@@ -27,9 +27,9 @@ Depois da configuração inicial (uma vez só), **nenhum passo manual é necess�
 ### 1. GitHub — criar o repositório e conectar este ambiente
 
 1. Crie um repositório **vazio** chamado `mini-planet-voxel` em [github.com/new](https://github.com/new) (não marque "Add README").
-2. Crie um *fine-grained Personal Access Token* em [github.com/settings/personal-access-tokens](https://github.com/settings/personal-access-tokens):
+2. Crie um *fine-grained Personal Access Token* (passo a passo detalhado em [TUTORIAL.md](TUTORIAL.md), Parte 2):
    - **Repository access:** apenas `mini-planet-voxel`
-   - **Permissions:** `Contents: Read and Write`
+   - **Permissions:** `Contents: Read and Write` **e** `Workflows: Read and Write`
 3. Adicione **dois secrets neste ambiente de desenvolvimento** (painel de secrets do sandbox):
    - `GITHUB_TOKEN` = o token criado
    - `GITHUB_REPO` = `seu-usuario/mini-planet-voxel`
