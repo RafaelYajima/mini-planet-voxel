@@ -1,0 +1,34 @@
+name: DB · Aplicar schema no Supabase
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "src/db/schema.ts"
+      - "drizzle.config.ts"
+      - ".github/workflows/db-migrate.yml"
+  workflow_dispatch: # permite rodar manualmente pela aba Actions
+
+jobs:
+  migrate:
+    name: drizzle-kit push -> Supabase
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Instalar dependências
+        run: npm ci
+
+      - name: Aplicar schema no Supabase
+        # Requer o secret DATABASE_URL (Session Pooler URL do Supabase, porta 5432)
+        # configurado em: Repo -> Settings -> Secrets and variables -> Actions
+        run: npx drizzle-kit push --force
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
