@@ -59,11 +59,19 @@ export default function WeatherPanel() {
           max={23}
           step={1}
           value={hour}
+          onPointerDown={(e) => e.stopPropagation()}
+          onPointerMove={(e) => e.stopPropagation()}
+          onMouseDown={(e) => e.stopPropagation()}
+          onTouchStart={(e) => e.stopPropagation()}
           onInput={(e) => {
             const val = parseInt(e.currentTarget.value, 10);
             dispatch({ type: "SET_HOUR", payload: val });
           }}
-          className="w-full h-2 rounded-full appearance-none cursor-pointer bg-slate-800
+          onChange={(e) => {
+            const val = parseInt(e.currentTarget.value, 10);
+            dispatch({ type: "SET_HOUR", payload: val });
+          }}
+          className="w-full h-2 rounded-full appearance-none cursor-pointer bg-slate-800 touch-none
             [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-5 [&::-webkit-slider-thumb]:h-5
             [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-sky-400
             [&::-webkit-slider-thumb]:shadow-[0_0_10px_rgba(56,189,248,0.5)] [&::-webkit-slider-thumb]:cursor-pointer
