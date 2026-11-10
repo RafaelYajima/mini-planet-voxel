@@ -54,7 +54,7 @@ export default function WeatherPanel() {
           max={23}
           step={1}
           value={hour}
-          onChange={(e) => {
+          onInput={(e) => {
             const val = parseInt(e.currentTarget.value, 10);
             dispatch({ type: "SET_HOUR", payload: val });
           }}
