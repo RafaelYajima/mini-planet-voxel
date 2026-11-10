@@ -1,14 +1,37 @@
 import {
   ArrowRight,
   Boxes,
+  CheckCircle2,
   Database,
   GitBranch,
   Rocket,
   ShieldCheck,
   Sparkles,
   Triangle,
+  XCircle,
 } from "lucide-react";
 import PlanetScene from "@/components/PlanetScene";
+import { db } from "@/db";
+import { sql } from "drizzle-orm";
+
+async function DbStatus() {
+  try {
+    await db.execute(sql`select 1`);
+    return (
+      <div className="inline-flex items-center gap-2 rounded-full border border-sky-400/25 bg-sky-400/10 px-3.5 py-1.5 text-xs font-medium text-sky-300">
+        <CheckCircle2 className="h-3.5 w-3.5" />
+        Supabase Conectado
+      </div>
+    );
+  } catch {
+    return (
+      <div className="inline-flex items-center gap-2 rounded-full border border-red-400/25 bg-red-400/10 px-3.5 py-1.5 text-xs font-medium text-red-300">
+        <XCircle className="h-3.5 w-3.5" />
+        Erro no Banco
+      </div>
+    );
+  }
+}
 
 // O lucide removeu ícones de marca — usamos o GitHub mark como SVG inline.
 function GithubMark({ className }: { className?: string }) {
@@ -71,7 +94,26 @@ const fluxo = [
   },
 ];
 
-export default function HomePage() {
+export default async function HomePage() {
+  const dbStatus = await (async () => {
+    try {
+      await db.execute(sql`select 1`);
+      return (
+        <div className="inline-flex items-center gap-2 rounded-full border border-sky-400/25 bg-sky-400/10 px-3.5 py-1.5 text-xs font-medium text-sky-300">
+          <CheckCircle2 className="h-3.5 w-3.5" />
+          Supabase Conectado
+        </div>
+      );
+    } catch {
+      return (
+        <div className="inline-flex items-center gap-2 rounded-full border border-red-400/25 bg-red-400/10 px-3.5 py-1.5 text-xs font-medium text-red-300">
+          <XCircle className="h-3.5 w-3.5" />
+          Erro no Banco
+        </div>
+      );
+    }
+  })();
+
   return (
     <main className="bg-space-glow relative min-h-screen overflow-hidden">
       <div className="bg-noise-dots pointer-events-none absolute inset-0 opacity-60" />
@@ -105,9 +147,12 @@ export default function HomePage() {
       {/* Hero */}
       <section className="relative z-10 mx-auto grid max-w-7xl items-center gap-10 px-6 pt-8 pb-16 lg:grid-cols-[1.02fr_1fr] lg:px-10 lg:pt-4">
         <div>
-          <div className="inline-flex items-center gap-2 rounded-full border border-emerald-400/25 bg-emerald-400/10 px-3.5 py-1.5 text-xs font-medium text-emerald-300">
-            <Sparkles className="h-3.5 w-3.5" />
-            Ambiente dev configurado · v0.1
+          <div className="flex flex-wrap gap-2">
+            <div className="inline-flex items-center gap-2 rounded-full border border-emerald-400/25 bg-emerald-400/10 px-3.5 py-1.5 text-xs font-medium text-emerald-300">
+              <Sparkles className="h-3.5 w-3.5" />
+              Ambiente dev configurado · v0.1
+            </div>
+            {dbStatus}
           </div>
 
           <h1 className="mt-6 text-[clamp(2.75rem,6vw,4.75rem)] leading-[0.98] font-semibold tracking-tight text-slate-50">
