@@ -5,13 +5,13 @@ on:
     branches: [main]
     paths:
       - "src/db/schema.ts"
-      - "drizzle.config.ts"
+      - "scripts/apply-schema.mjs"
       - ".github/workflows/db-migrate.yml"
-  workflow_dispatch: # permite rodar manualmente pela aba Actions
+  workflow_dispatch:
 
 jobs:
   migrate:
-    name: drizzle-kit push -> Supabase
+    name: Aplicar schema no Supabase
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -20,15 +20,13 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
 
       - name: Instalar dependências
         run: npm ci
 
       - name: Aplicar schema no Supabase
-        # Requer o secret DATABASE_URL (Session Pooler URL do Supabase, porta 5432)
-        run: npx drizzle-kit push --force --verbose
+        run: node scripts/apply-schema.mjs
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
-          NODE_TLS_REJECT_UNAUTHORIZED: 0
