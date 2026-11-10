@@ -36,7 +36,12 @@ export default function DiaryPanel() {
   const dispatch  = useGameDispatch();
 
   return (
-    <div className="slide-in-right absolute right-4 top-16 z-30 w-72 rounded-2xl border border-white/10 bg-slate-950/90 backdrop-blur-md shadow-2xl overflow-hidden">
+    <div
+      className="slide-in-right absolute right-4 top-16 z-30 w-72 rounded-2xl border border-white/10 bg-slate-950/90 backdrop-blur-md shadow-2xl overflow-hidden"
+      onPointerDown={(e) => e.stopPropagation()}
+      onMouseDown={(e) => e.stopPropagation()}
+      onTouchStart={(e) => e.stopPropagation()}
+    >
       {/* Capa do livro */}
       <div className="bg-gradient-to-br from-amber-900/40 to-amber-950/60 border-b border-amber-700/20 px-5 py-4">
         <div className="flex items-center justify-between">

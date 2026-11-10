@@ -9,10 +9,16 @@ import {
   ScanEye, ZoomIn, ZoomOut, Boxes,
 } from "lucide-react";
 import type { ZoomLevel } from "@/store/gameStore";
+import type { PointerEvent as ReactPointerEvent, MouseEvent as ReactMouseEvent, TouchEvent as ReactTouchEvent } from "react";
 
 const WEATHER_EMOJI: Record<string, string> = {
   sunny: "☀️", rain: "🌧️", snow: "❄️", fog: "🌫️", storm: "⛈️",
 };
+
+/** Impede que eventos de arraste/clique cheguem ao Canvas 3D */
+function blockCanvas(e: ReactPointerEvent | ReactMouseEvent | ReactTouchEvent) {
+  e.stopPropagation();
+}
 
 export default function HUD() {
   const state    = useGameState();
@@ -35,11 +41,16 @@ export default function HUD() {
       {/* ══════════ HUD principal (oculto no Zen) ══════════ */}
       <div
         className={`fixed inset-0 pointer-events-none z-20 zen-fade ${
-          zenMode ? "opacity-0" : "opacity-100"
+          zenMode ? "opacity-0 pointer-events-none" : "opacity-100"
         }`}
       >
         {/* ── BARRA SUPERIOR ── */}
-        <div className="pointer-events-auto absolute top-0 left-0 right-0 flex items-center justify-between px-4 py-3 bg-slate-950/60 backdrop-blur-md border-b border-white/5">
+        <div
+          className="pointer-events-auto absolute top-0 left-0 right-0 flex items-center justify-between px-4 py-3 bg-slate-950/60 backdrop-blur-md border-b border-white/5"
+          onPointerDown={blockCanvas}
+          onMouseDown={blockCanvas}
+          onTouchStart={blockCanvas}
+        >
           {/* Esquerda: Logo + Nível + XP */}
           <div className="flex items-center gap-4">
             <div className="flex items-center gap-2 mr-2">
@@ -89,7 +100,12 @@ export default function HUD() {
         </div>
 
         {/* ── CONTROLES DE ZOOM (direita, meio) ── */}
-        <div className="pointer-events-auto absolute right-4 top-1/2 -translate-y-1/2 flex flex-col gap-2">
+        <div
+          className="pointer-events-auto absolute right-4 top-1/2 -translate-y-1/2 flex flex-col gap-2"
+          onPointerDown={blockCanvas}
+          onMouseDown={blockCanvas}
+          onTouchStart={blockCanvas}
+        >
           {(["macro", "normal", "micro"] as ZoomLevel[]).map((z) => {
             const icons = { macro: Maximize2, normal: Minimize2, micro: ZoomIn };
             const labels = { macro: "Macro", normal: "Normal", micro: "Micro" };
@@ -118,14 +134,17 @@ export default function HUD() {
         </div>
 
         {/* ── BARRA INFERIOR (Planet Info + Portal) ── */}
-        <div className="pointer-events-auto absolute bottom-0 left-0 right-0 flex items-center justify-between px-4 py-3 bg-slate-950/60 backdrop-blur-md border-t border-white/5">
-          {/* Planeta atual */}
+        <div
+          className="pointer-events-auto absolute bottom-0 left-0 right-0 flex items-center justify-between px-4 py-3 bg-slate-950/60 backdrop-blur-md border-t border-white/5"
+          onPointerDown={blockCanvas}
+          onMouseDown={blockCanvas}
+          onTouchStart={blockCanvas}
+        >
           <div>
             <p className="text-[9px] uppercase tracking-widest text-slate-500 font-bold">Planeta Atual</p>
             <p className="text-sm font-semibold text-slate-200">🌿 Oásis Vibrante</p>
           </div>
 
-          {/* Portal (bloqueado até nível 5) */}
           <div className="flex items-center gap-3">
             {level >= 5 ? (
               <button className="flex items-center gap-2 px-4 py-2 rounded-xl bg-violet-500 hover:bg-violet-400 text-white text-xs font-bold transition shadow-[0_0_20px_rgba(167,139,250,0.4)]">

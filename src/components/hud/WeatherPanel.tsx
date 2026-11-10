@@ -25,7 +25,12 @@ export default function WeatherPanel() {
     hour >= 18 && hour < 21 ? "🌆" : "🌙";
 
   return (
-    <div className="slide-in-right absolute right-4 top-16 z-30 w-72 rounded-2xl border border-white/10 bg-[#0a0c14]/95 backdrop-blur-xl p-5 shadow-2xl">
+    <div
+      className="slide-in-right absolute right-4 top-16 z-30 w-72 rounded-2xl border border-white/10 bg-[#0a0c14]/95 backdrop-blur-xl p-5 shadow-2xl"
+      onPointerDown={(e) => e.stopPropagation()}
+      onMouseDown={(e) => e.stopPropagation()}
+      onTouchStart={(e) => e.stopPropagation()}
+    >
       {/* Header */}
       <div className="flex items-center justify-between mb-5">
         <h3 className="text-xs font-bold uppercase tracking-[0.2em] text-slate-300">

@@ -7,7 +7,7 @@ import * as THREE from "three";
 import { useGameState } from "@/context/GameContext";
 import type { WeatherType, ZoomLevel } from "@/store/gameStore";
 
-const R = 120; // Raio Massivo
+const R = 40; // Raio do planeta
 
 const C = {
   grass1: new THREE.Color("#4ade80"),
@@ -176,7 +176,7 @@ export default function VoxelPlanet() {
 
   return (
     <div className="absolute inset-0">
-      <Canvas camera={{ position: [0, 50, 300], fov: 45 }} dpr={[1, 1.5]}>
+      <Canvas camera={{ position: [0, 20, R * 2.8], fov: 45 }} dpr={[1, 1.5]}>
         <Atmosphere />
         <ambientLight intensity={0.4} />
         <GodLight />
