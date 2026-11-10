@@ -148,6 +148,7 @@ A partir daí, **nunca mais toca em nada disso**: cada conversa termina com push
 | Action "DB" falha com erro de SSL | Conexão sem SSL | Adicione `?sslmode=require` no fim da URL do secret |
 | Vercel falha ao conectar no banco | `DATABASE_URL` não configurada | Parte 5.4 → depois Redeploy |
 | Site no ar mas página quebra | Deploy rodou antes da Action do banco | Rode a Action "DB" manualmente (Parte 7.4) e dê Redeploy |
+| Vercel: "couldn't find a Git account for the commit author" | Commit feito com e-mail genérico, sem conta GitHub vinculada | Já corrigido: todos os commits usam o noreply email do dono da conta. Em planos Hobby a Vercel exige isso. Não precisa de upgrade Pro. |
 
 ## Cola rápida (resumo de uma página)
 
