@@ -2,7 +2,7 @@
 
 import { useLayoutEffect, useMemo, useRef } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
-import { Stars, Sparkles } from "@react-three/drei";
+import { Stars, Sparkles, OrbitControls } from "@react-three/drei";
 import * as THREE from "three";
 import { useGameState } from "@/context/GameContext";
 import type { WeatherType, ZoomLevel } from "@/store/gameStore";
@@ -47,29 +47,49 @@ function surfaceColor(
 
 type VoxelData = { pos: [number,number,number]; color: THREE.Color };
 
-/* ─── Gera os voxels do planeta ─── */
-function generatePlanet(weather: WeatherType, seed = 42): VoxelData[] {
-  const R = 6;
+/* ─── Gera os voxels do planeta (Otimizado para escala R=40) ─── */
+function generatePlanet(weather: WeatherType, seed = 1337): VoxelData[] {
+  const R = 40; // Planeta ~7x maior em raio (~350x mais volume)
   const voxels: VoxelData[] = [];
   let trees = 0;
+  const treeLimit = 180; // Mais árvores para a nova escala
 
-  for (let x = -R-1; x <= R+1; x++)
-  for (let y = -R-1; y <= R+1; y++)
-  for (let z = -R-1; z <= R+1; z++) {
-    const d = Math.sqrt(x*x + y*y + z*z);
-    if (d >= R - 1.1 && d <= R + 0.3) {
-      voxels.push({ pos: [x, y, z], color: surfaceColor(x + seed, y, z, weather) });
+  // Usamos um passo maior ou lógica de shell para não estourar a memória
+  // Geramos apenas voxels onde a distância é próxima ao raio (casca)
+  for (let x = -R - 1; x <= R + 1; x++) {
+    for (let y = -R - 1; y <= R + 1; y++) {
+      // Otimização: se x e y estão longe da borda, z pode ser calculado ou filtrado
+      if (Math.abs(x) > R + 1 || Math.abs(y) > R + 1) continue;
+      
+      for (let z = -R - 1; z <= R + 1; z++) {
+        const dSq = x * x + y * y + z * z;
+        const rMinSq = (R - 1.1) * (R - 1.1);
+        const rMaxSq = (R + 0.5) * (R + 0.5);
+
+        if (dSq >= rMinSq && dSq <= rMaxSq) {
+          voxels.push({
+            pos: [x, y, z],
+            color: surfaceColor(x + seed, y, z, weather),
+          });
+        }
+      }
     }
   }
-  // Árvores no hemisfério superior
-  for (const v of voxels) {
-    if (trees >= 10) break;
+
+  // Árvores espalhadas
+  for (let i = 0; i < voxels.length; i += 15) {
+    if (trees >= treeLimit) break;
+    const v = voxels[i];
     const [x, y, z] = v.pos;
     const n = hash(x, y, z);
-    if (y >= 1 && y <= 4 && n > 0.52 && n < 0.57) {
-      voxels.push({ pos: [x, y+1, z], color: PALETTE.trunk });
-      voxels.push({ pos: [x, y+2, z], color: PALETTE.leaf });
-      voxels.push({ pos: [x, y+3, z], color: PALETTE.leaf });
+    
+    // Árvores nascem na grama (y > -10 e y < 30)
+    if (y > -10 && y < 30 && n > 0.985) {
+      voxels.push({ pos: [x, y + 1, z], color: PALETTE.trunk });
+      voxels.push({ pos: [x, y + 2, z], color: PALETTE.leaf });
+      voxels.push({ pos: [x, y + 3, z], color: PALETTE.leaf });
+      voxels.push({ pos: [x + 1, y + 2, z], color: PALETTE.leaf });
+      voxels.push({ pos: [x - 1, y + 2, z], color: PALETTE.leaf });
       trees++;
     }
   }
@@ -152,20 +172,20 @@ function FogEffect({ weather }: { weather: WeatherType }) {
   return null;
 }
 
-/* ─── Câmera reativa ao zoom ─── */
-const ZOOM_POS: Record<ZoomLevel, [number,number,number]> = {
-  macro:  [0, 0, 32],
-  normal: [0, 2, 20],
-  micro:  [0, 1, 11],
+/* ─── Câmera reativa (Escalada para R=40) ─── */
+const ZOOM_POS: Record<ZoomLevel, [number, number, number]> = {
+  macro: [0, 0, 140],
+  normal: [0, 20, 100],
+  micro: [0, 5, 65],
 };
 
 function CameraRig({ zoom }: { zoom: ZoomLevel }) {
   const { camera } = useThree();
   const target = ZOOM_POS[zoom];
-  useFrame((_, delta) => {
-    camera.position.x += (target[0] - camera.position.x) * delta * 2;
-    camera.position.y += (target[1] - camera.position.y) * delta * 2;
-    camera.position.z += (target[2] - camera.position.z) * delta * 2;
+  useFrame((state, delta) => {
+    // Interpolação suave para a posição
+    camera.position.lerp(new THREE.Vector3(...target), delta * 2.5);
+    camera.lookAt(0, 0, 0);
   });
   return null;
 }
@@ -173,10 +193,11 @@ function CameraRig({ zoom }: { zoom: ZoomLevel }) {
 /* ─── Planeta principal ─── */
 function PlanetGroup({ weather }: { weather: WeatherType }) {
   const ref = useRef<THREE.Group>(null!);
+  // Adicionamos weather no useMemo para o planeta mudar se o clima mudar
   const voxels = useMemo(() => generatePlanet(weather), [weather]);
 
   useFrame((_, delta) => {
-    ref.current.rotation.y += delta * (weather === "storm" ? 0.3 : 0.1);
+    ref.current.rotation.y += delta * (weather === "storm" ? 0.25 : 0.08);
   });
 
   return (
@@ -186,11 +207,17 @@ function PlanetGroup({ weather }: { weather: WeatherType }) {
   );
 }
 
-/* ─── Cor de fundo por hora do dia ─── */
+/* ─── Cor de fundo refinada (Céu Dinâmico) ─── */
 function skyColor(hour: number): string {
-  if (hour >= 6  && hour < 12) return "#0f172a";
-  if (hour >= 12 && hour < 18) return "#05070f";
-  if (hour >= 18 && hour < 21) return "#0f0a1a";
+  // Madrugada
+  if (hour >= 0 && hour < 5) return "#02040a";
+  // Amanhecer
+  if (hour >= 5 && hour < 8) return "#1e1b4b";
+  // Dia
+  if (hour >= 8 && hour < 17) return "#05070f";
+  // Entardecer
+  if (hour >= 17 && hour < 20) return "#1e1a2b";
+  // Noite
   return "#020408";
 }
 
@@ -200,23 +227,28 @@ export default function VoxelPlanet() {
 
   return (
     <div className="absolute inset-0">
-      <Canvas camera={{ position: ZOOM_POS["normal"], fov: 42 }} dpr={[1, 1.5]}>
+      <Canvas camera={{ position: ZOOM_POS["normal"], fov: 45 }} dpr={[1, 1.5]}>
         <color attach="background" args={[skyColor(hour)]} />
         <FogEffect weather={weather} />
         <CameraRig zoom={zoom} />
-        <ambientLight intensity={weather === "storm" ? 0.3 : 0.6} />
-        <hemisphereLight args={["#bfdbfe", "#312e2b", 0.5]} />
+        <ambientLight intensity={weather === "storm" ? 0.35 : 0.65} />
+        <hemisphereLight args={["#bfdbfe", "#1e293b", 0.5]} />
         <directionalLight
-          position={[8, 12, 8]}
-          intensity={weather === "fog" ? 0.4 : 1.2}
-          castShadow
+          position={[20, 40, 20]}
+          intensity={weather === "fog" ? 0.5 : 1.3}
         />
         <PlanetGroup weather={weather} />
         <WeatherParticles weather={weather} />
-        <Stars radius={90} depth={50} count={3000} factor={4} fade speed={0.5} />
+        <Stars radius={150} depth={50} count={5000} factor={6} fade speed={0.4} />
         {weather === "sunny" && (
-          <Sparkles count={40} scale={[18,10,18]} size={1.5} speed={0.3} color="#fde68a" />
+          <Sparkles count={100} scale={[60, 40, 60]} size={2} speed={0.4} color="#fde68a" />
         )}
+        <OrbitControls 
+          enablePan={false} 
+          minDistance={50} 
+          maxDistance={200}
+          autoRotate={false}
+        />
       </Canvas>
     </div>
   );

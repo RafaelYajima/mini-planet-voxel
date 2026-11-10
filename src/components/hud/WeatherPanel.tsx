@@ -38,19 +38,23 @@ export default function WeatherPanel() {
       <div className="mb-4">
         <div className="flex justify-between text-[10px] text-slate-500 mb-1.5">
           <span>Hora do dia</span>
-          <span className="text-slate-300 font-mono font-bold">{timeLabel}</span>
+          <span className="text-sky-400 font-mono font-bold text-sm tracking-tighter">{timeLabel}</span>
         </div>
         <input
-          type="range" min={0} max={23} value={hour}
-          onChange={(e) => dispatch({ type: "SET_HOUR", payload: Number(e.target.value) })}
-          className="w-full h-1.5 rounded-full accent-sky-400 cursor-pointer"
+          type="range"
+          min="0"
+          max="23"
+          step="1"
+          value={hour}
+          onInput={(e) => dispatch({ type: "SET_HOUR", payload: parseInt((e.target as HTMLInputElement).value) })}
+          className="w-full h-1.5 rounded-full accent-sky-400 cursor-pointer bg-slate-800"
         />
-        <div className="flex justify-between text-[9px] text-slate-600 mt-1">
-          <span>🌙 00h</span>
-          <span>🌅 06h</span>
-          <span>☀️ 12h</span>
-          <span>🌆 18h</span>
-          <span>🌙 23h</span>
+        <div className="flex justify-between text-[9px] text-slate-600 mt-1 font-medium">
+          <span>00h</span>
+          <span>06h</span>
+          <span>12h</span>
+          <span>18h</span>
+          <span>23h</span>
         </div>
       </div>
 

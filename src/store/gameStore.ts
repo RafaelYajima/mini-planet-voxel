@@ -66,7 +66,7 @@ export function gameReducer(state: GameState, action: GameAction): GameState {
       return { ...state, weather: action.payload, realWeather: false };
 
     case "SET_HOUR":
-      return { ...state, hour: action.payload };
+      return { ...state, hour: Math.floor(action.payload) };
 
     case "TOGGLE_REAL_WEATHER":
       return { ...state, realWeather: !state.realWeather };
