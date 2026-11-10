@@ -28,7 +28,7 @@ jobs:
 
       - name: Aplicar schema no Supabase
         # Requer o secret DATABASE_URL (Session Pooler URL do Supabase, porta 5432)
-        # configurado em: Repo -> Settings -> Secrets and variables -> Actions
-        run: npx drizzle-kit push --force
+        run: npx drizzle-kit push --force --verbose
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          NODE_TLS_REJECT_UNAUTHORIZED: 0
