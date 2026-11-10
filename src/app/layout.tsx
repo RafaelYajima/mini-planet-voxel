@@ -4,7 +4,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "Mini-planet Voxel",
-  description: "Mini-planet Voxel",
+  description: "Pequenos ecossistemas voxel interativos com clima, progressão e segredos.",
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {
