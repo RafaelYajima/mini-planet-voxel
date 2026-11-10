@@ -73,26 +73,38 @@ function terrainHeight(nx: number, ny: number, nz: number): number {
   const base = (fbm(nx*1.6,ny*1.6,nz*1.6)-0.5)*5 + (fbm(nx*4+10,ny*4,nz*4)-0.5)*2;
   const peaks = infl(dir,PEAK_1,0.95)*20 + infl(dir,PEAK_2,0.95)*16 + infl(dir,PEAK_3,0.955)*22;
 
-  // Cratera grande estilo bacia com fundo plano caminhável
+  // Cratera profunda com fundo plano e entrada de caverna
   const d = dot3(dir, HOLE_DIR);
   let crater = 0;
+  const craterDepth = 18;
   if (d > 0.965) {
-    crater = -12; // fundo plano
-  } else if (d > 0.90) {
-    const t = (d - 0.90) / (0.965 - 0.90);
-    crater = -12 * (t * t * (3 - 2 * t)); // descida suave até o fundo
+    crater = -craterDepth; // fundo plano profundo
+  } else if (d > 0.88) {
+    const t = (d - 0.88) / (0.965 - 0.88);
+    crater = -craterDepth * (t * t * (3 - 2 * t)); // descida suave
   }
 
   // Borda elevada da cratera
   let rim = 0;
-  if (d > 0.84 && d < 0.92) {
-    const center = 0.88;
+  if (d > 0.82 && d < 0.90) {
+    const center = 0.86;
     const width = 0.04;
     const t = 1 - Math.min(1, Math.abs(d - center) / width);
-    rim = t * 4.5;
+    rim = t * 5;
   }
 
-  return base + peaks + crater + rim;
+  // Caverna — túnel que sai da parede da cratera para dentro do planeta
+  const CAVE_DIR = norm([-0.6, 0.08, -0.8]);
+  const caveDot = dot3(dir, CAVE_DIR);
+  let cave = 0;
+  if (caveDot > 0.985) {
+    cave = -8; // escava um túnel estreito
+  } else if (caveDot > 0.975) {
+    const t = (caveDot - 0.975) / (0.985 - 0.975);
+    cave = -8 * t * t;
+  }
+
+  return base + peaks + crater + rim + cave;
 }
 
 /* ═══════ COR ═══════ */
@@ -101,10 +113,10 @@ function terrainColor(h: number, n: number, w: WeatherType): THREE.Color {
   if(h>12) return n>0.45?C.snow1:C.snow2;
   if(h>7) return n>0.55?C.stone1:C.stone2;
   if(h>4.5) return n>0.6?C.stone1:C.grass4;
-  // Fundo da cratera: chão visível, não preto
-  if(h<=-11) return n>0.5?C.craterFloor:C.stone2;
-  if(h<-6) return n>0.5?C.stoneDeep:C.stone3;
-  if(h<-2.5) return n>0.5?C.stone2:C.dirt1;
+  // Cratera e caverna
+  if(h<=-15) return n>0.5?C.craterFloor:C.stone2;
+  if(h<-8) return n>0.5?C.stoneDeep:C.stone3;
+  if(h<-3) return n>0.5?C.stone2:C.dirt1;
   if(w==="rain"&&h<1.5) return n>0.5?C.mud:C.dirt1;
   if(n>0.87) return C.dirt2;
   if(n>0.62) return C.grass1;
@@ -225,7 +237,7 @@ function addColossalTree(data: VD[], occ: Set<string>) {
 function addCraterFloor(data: VD[], occ: Set<string>) {
   // Ponto central da cratera na superfície do planeta
   const [nx, ny, nz] = HOLE_DIR;
-  const centerDist = R - 12; // 12 unidades abaixo da superfície = fundo da cratera
+  const centerDist = R - 18; // 18 unidades abaixo da superfície = fundo da cratera
   const cx = nx * centerDist;
   const cy = ny * centerDist;
   const cz = nz * centerDist;
@@ -241,7 +253,7 @@ function addCraterFloor(data: VD[], occ: Set<string>) {
   const e2: [number,number,number] = [e2x/e2len, e2y/e2len, e2z/e2len];
 
   // Preenche disco de raio 9 no plano do fundo
-  const floorR = 9;
+  const floorR = 11; // chão mais largo para a cratera mais profunda
   for (let u = -floorR; u <= floorR; u++) {
     for (let v = -floorR; v <= floorR; v++) {
       if (u*u + v*v > floorR*floorR) continue;
@@ -271,7 +283,7 @@ function generatePlanet(weather: WeatherType): VD[] {
   // Primeiro: marcar todos os pontos sólidos
   const solidSet = new Set<string>();
   const maxR = R + 25;
-  const minR = R - 15; // expandido para cobrir o fundo da cratera
+  const minR = R - 22; // expandido para cobrir cratera profunda + caverna
 
   for(let x=-maxR;x<=maxR;x++)
   for(let y=-maxR;y<=maxR;y++)
@@ -363,16 +375,25 @@ function VoxelInstances({voxels}:{voxels:VD[]}) {
   );
 }
 
-/* ═══════ ATMOSFERA — ATUALIZAÇÃO DIRETA ═══════ */
+/* ═══════ ATMOSFERA — COM TRANSIÇÃO SUAVE ═══════ */
 function Atmosphere() {
   const {hour,weather}=useGameState();
   const {scene}=useThree();
+  const targetColor = useRef(new THREE.Color("#070e2b"));
+  const currentColor = useRef(new THREE.Color("#070e2b"));
+  const targetFogNear = useRef(999);
+  const targetFogFar = useRef(999);
+  const currentFogNear = useRef(999);
+  const currentFogFar = useRef(999);
+  const fogColor = useRef(new THREE.Color("#334155"));
 
-  // Atualiza A CADA FRAME para garantir reatividade ao slider
-  useFrame(()=>{
-    let bg:string;
+  useFrame((_,delta)=>{
+    // Cor do céu alvo
+    let bg: string;
     if(weather==="storm") bg="#0a0a0f";
     else if(weather==="fog") bg="#1e293b";
+    else if(weather==="rain") bg="#0d1025";
+    else if(weather==="snow") bg="#101828";
     else if(hour<5) bg="#020408";
     else if(hour<7) bg="#1a0e3a";
     else if(hour<8) bg="#1e1b4b";
@@ -382,14 +403,152 @@ function Atmosphere() {
     else if(hour<20) bg="#12082a";
     else bg="#020408";
 
-    (scene.background as THREE.Color).set(bg);
+    targetColor.current.set(bg);
+    // Interpola suavemente
+    currentColor.current.lerp(targetColor.current, delta * 3);
+    (scene.background as THREE.Color).copy(currentColor.current);
 
-    if(weather==="fog") { if(!scene.fog) scene.fog=new THREE.Fog("#334155",R*0.8,R*3); }
-    else if(weather==="storm") { if(!scene.fog||!(scene.fog as THREE.Fog).color.equals(new THREE.Color("#0f172a"))) scene.fog=new THREE.Fog("#0f172a",R,R*3.5); }
-    else { scene.fog=null; }
+    // Névoa com transição suave
+    if(weather==="fog") {
+      targetFogNear.current = R * 0.6;
+      targetFogFar.current = R * 2.5;
+      fogColor.current.set("#334155");
+    } else if(weather==="storm") {
+      targetFogNear.current = R * 0.8;
+      targetFogFar.current = R * 3;
+      fogColor.current.set("#0f172a");
+    } else if(weather==="rain") {
+      targetFogNear.current = R * 1.5;
+      targetFogFar.current = R * 5;
+      fogColor.current.set("#1a2332");
+    } else if(weather==="snow") {
+      targetFogNear.current = R * 1.2;
+      targetFogFar.current = R * 4;
+      fogColor.current.set("#1e293b");
+    } else {
+      targetFogNear.current = R * 8;
+      targetFogFar.current = R * 12;
+    }
+
+    currentFogNear.current += (targetFogNear.current - currentFogNear.current) * delta * 2;
+    currentFogFar.current += (targetFogFar.current - currentFogFar.current) * delta * 2;
+
+    if(weather==="sunny") {
+      if(scene.fog) {
+        const f = scene.fog as THREE.Fog;
+        f.near += (R*8 - f.near) * delta * 2;
+        f.far += (R*12 - f.far) * delta * 2;
+        if(f.near > R * 6) scene.fog = null;
+      }
+    } else {
+      if(!scene.fog) scene.fog = new THREE.Fog(fogColor.current, currentFogNear.current, currentFogFar.current);
+      else {
+        const f = scene.fog as THREE.Fog;
+        f.color.lerp(fogColor.current, delta * 2);
+        f.near += (currentFogNear.current - f.near) * delta * 2;
+        f.far += (currentFogFar.current - f.far) * delta * 2;
+      }
+    }
   });
 
-  return <color attach="background" args={["#070e2b"]}/>; // valor inicial
+  return <color attach="background" args={["#070e2b"]}/>;
+}
+
+/* ═══════ PARTÍCULAS DE CLIMA SUAVES ═══════ */
+function WeatherParticles() {
+  const {weather} = useGameState();
+  const rainRef = useRef<THREE.Points>(null!);
+  const snowRef = useRef<THREE.Points>(null!);
+  const targetOpacity = useRef(0);
+
+  const rainCount = 3000;
+  const snowCount = 1500;
+  const spread = R * 3.5;
+
+  const rainGeo = useMemo(() => {
+    const pos = new Float32Array(rainCount * 3);
+    for(let i=0;i<rainCount;i++) {
+      pos[i*3] = (Math.random()-0.5)*spread;
+      pos[i*3+1] = Math.random()*spread - spread/3;
+      pos[i*3+2] = (Math.random()-0.5)*spread;
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+    return g;
+  }, [spread]);
+
+  const snowGeo = useMemo(() => {
+    const pos = new Float32Array(snowCount * 3);
+    for(let i=0;i<snowCount;i++) {
+      pos[i*3] = (Math.random()-0.5)*spread;
+      pos[i*3+1] = Math.random()*spread - spread/3;
+      pos[i*3+2] = (Math.random()-0.5)*spread;
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+    return g;
+  }, [spread]);
+
+  useFrame((_,delta) => {
+    const isRain = weather === "rain" || weather === "storm";
+    const isSnow = weather === "snow";
+
+    // Suaviza opacidade
+    const tgt = (isRain || isSnow) ? 1 : 0;
+    targetOpacity.current += (tgt - targetOpacity.current) * delta * 2;
+
+    // Chuva
+    if(rainRef.current) {
+      const mat = rainRef.current.material as THREE.PointsMaterial;
+      mat.opacity = isRain ? targetOpacity.current * 0.6 : 0;
+      mat.size = weather === "storm" ? 0.7 : 0.35;
+
+      if(isRain) {
+        const pos = rainRef.current.geometry.attributes.position as THREE.BufferAttribute;
+        const speed = weather === "storm" ? 80 : 40;
+        const wind = weather === "storm" ? delta * 15 : delta * 3;
+        for(let i=0;i<pos.count;i++) {
+          pos.setY(i, pos.getY(i) - delta * speed);
+          pos.setX(i, pos.getX(i) + wind);
+          if(pos.getY(i) < -spread/2) { pos.setY(i, spread/2); pos.setX(i, (Math.random()-0.5)*spread); }
+        }
+        pos.needsUpdate = true;
+      }
+    }
+
+    // Neve
+    if(snowRef.current) {
+      const mat = snowRef.current.material as THREE.PointsMaterial;
+      mat.opacity = isSnow ? targetOpacity.current * 0.7 : 0;
+
+      if(isSnow) {
+        const pos = snowRef.current.geometry.attributes.position as THREE.BufferAttribute;
+        for(let i=0;i<pos.count;i++) {
+          pos.setY(i, pos.getY(i) - delta * 8);
+          // Ondulação lateral suave
+          pos.setX(i, pos.getX(i) + Math.sin(pos.getY(i) * 0.1 + i) * delta * 2);
+          pos.setZ(i, pos.getZ(i) + Math.cos(pos.getY(i) * 0.08 + i * 0.5) * delta * 1.5);
+          if(pos.getY(i) < -spread/2) {
+            pos.setY(i, spread/2);
+            pos.setX(i, (Math.random()-0.5)*spread);
+            pos.setZ(i, (Math.random()-0.5)*spread);
+          }
+        }
+        pos.needsUpdate = true;
+      }
+    }
+  });
+
+  return (
+    <>
+      <points ref={rainRef} geometry={rainGeo}>
+        <pointsMaterial color="#7dd3fc" size={0.35} transparent opacity={0} depthWrite={false} />
+      </points>
+      <points ref={snowRef} geometry={snowGeo}>
+        <pointsMaterial color="#e0f2fe" size={1.2} transparent opacity={0} depthWrite={false} />
+      </points>
+    </>
+  );
 }
 
 /* ═══════ SOL ═══════ */
@@ -438,6 +597,7 @@ export default function VoxelPlanet() {
         <hemisphereLight args={["#bfdbfe","#1e293b",0.25]}/>
         <SunLight/>
         <PlanetGroup weather={weather}/>
+        <WeatherParticles/>
         <Stars radius={R*6} depth={R*2} count={5000} factor={6} fade speed={0.3}/>
         <OrbitControls enabled={orbitEnabled} enablePan={false} minDistance={R*1.3} maxDistance={R*4.5} enableDamping dampingFactor={0.05}/>
       </Canvas>
