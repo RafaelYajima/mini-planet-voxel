@@ -8,31 +8,40 @@ import { useGameState } from "@/context/GameContext";
 import type { WeatherType } from "@/store/gameStore";
 
 const R = 40;
-const MAX_HEIGHT = 18;
-const MAX_R = R + MAX_HEIGHT + 4;
+const MAX_HEIGHT = 20;
+const MAX_R = R + MAX_HEIGHT + 5;
 
+/* ═══════ PALETA ═══════ */
 const C = {
-  grass1: new THREE.Color("#4ade80"),
-  grass2: new THREE.Color("#22c55e"),
-  grass3: new THREE.Color("#16a34a"),
-  grass4: new THREE.Color("#15803d"),
-  dirt1: new THREE.Color("#92400e"),
-  dirt2: new THREE.Color("#a16207"),
-  stone1: new THREE.Color("#6b7280"),
-  stone2: new THREE.Color("#4b5563"),
-  stone3: new THREE.Color("#374151"),
-  snow1: new THREE.Color("#e0f2fe"),
-  snow2: new THREE.Color("#f8fafc"),
-  mud: new THREE.Color("#5c2d0a"),
-  trunk: new THREE.Color("#5b3418"),
-  leaf1: new THREE.Color("#15803d"),
-  leaf2: new THREE.Color("#166534"),
-  leaf3: new THREE.Color("#14532d"),
+  grass1:    new THREE.Color("#4ade80"),
+  grass2:    new THREE.Color("#22c55e"),
+  grass3:    new THREE.Color("#16a34a"),
+  grass4:    new THREE.Color("#15803d"),
+  dirt1:     new THREE.Color("#92400e"),
+  dirt2:     new THREE.Color("#a16207"),
+  stone1:    new THREE.Color("#6b7280"),
+  stone2:    new THREE.Color("#4b5563"),
+  stone3:    new THREE.Color("#374151"),
+  stoneHole: new THREE.Color("#1f2937"),
+  snow1:     new THREE.Color("#e0f2fe"),
+  snow2:     new THREE.Color("#f8fafc"),
+  mud:       new THREE.Color("#5c2d0a"),
+  trunk:     new THREE.Color("#5b3418"),
+  trunkDark: new THREE.Color("#3e200c"),
+  bark:      new THREE.Color("#4a2c12"),
+  leaf1:     new THREE.Color("#15803d"),
+  leaf2:     new THREE.Color("#166534"),
+  leaf3:     new THREE.Color("#14532d"),
+  leafBright:new THREE.Color("#22c55e"),
 };
 
+/* ═══════ DIREÇÕES FIXAS ═══════ */
 function normalize(v: [number, number, number]): [number, number, number] {
-  const d = Math.sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
-  return [v[0] / d, v[1] / d, v[2] / d];
+  const d = Math.sqrt(v[0]*v[0]+v[1]*v[1]+v[2]*v[2]);
+  return [v[0]/d, v[1]/d, v[2]/d];
+}
+function dot3(a: [number,number,number], b: [number,number,number]) {
+  return a[0]*b[0]+a[1]*b[1]+a[2]*b[2];
 }
 
 const PEAK_1 = normalize([0.82, 0.38, -0.41]);
@@ -41,82 +50,57 @@ const PEAK_3 = normalize([0.16, 0.78, 0.60]);
 const HOLE_DIR = normalize([-0.78, 0.08, -0.62]);
 const TREE_DIR = normalize([0.48, 0.12, 0.86]);
 
-function dot(a: [number, number, number], b: [number, number, number]) {
-  return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
-}
-
+/* ═══════ RUÍDO ═══════ */
 function hash(x: number, y: number, z: number): number {
-  let h = (x * 374761393 + y * 668265263 + z * 1274126177) | 0;
-  h = ((h ^ (h >> 13)) * 1103515245) | 0;
-  return ((h ^ (h >> 16)) & 0x7fffffff) / 0x7fffffff;
+  let h = (x*374761393+y*668265263+z*1274126177)|0;
+  h=((h^(h>>13))*1103515245)|0;
+  return ((h^(h>>16))&0x7fffffff)/0x7fffffff;
 }
 
 function noise3d(x: number, y: number, z: number): number {
-  const ix = Math.floor(x), iy = Math.floor(y), iz = Math.floor(z);
-  const fx = x - ix, fy = y - iy, fz = z - iz;
-  const sx = fx * fx * (3 - 2 * fx);
-  const sy = fy * fy * (3 - 2 * fy);
-  const sz = fz * fz * (3 - 2 * fz);
-  const n000 = hash(ix, iy, iz), n100 = hash(ix + 1, iy, iz);
-  const n010 = hash(ix, iy + 1, iz), n110 = hash(ix + 1, iy + 1, iz);
-  const n001 = hash(ix, iy, iz + 1), n101 = hash(ix + 1, iy, iz + 1);
-  const n011 = hash(ix, iy + 1, iz + 1), n111 = hash(ix + 1, iy + 1, iz + 1);
-  const n00 = n000 + (n100 - n000) * sx;
-  const n01 = n001 + (n101 - n001) * sx;
-  const n10 = n010 + (n110 - n010) * sx;
-  const n11 = n011 + (n111 - n011) * sx;
-  const n0 = n00 + (n10 - n00) * sy;
-  const n1 = n01 + (n11 - n01) * sy;
-  return n0 + (n1 - n0) * sz;
+  const ix=Math.floor(x),iy=Math.floor(y),iz=Math.floor(z);
+  const fx=x-ix,fy=y-iy,fz=z-iz;
+  const sx=fx*fx*(3-2*fx),sy=fy*fy*(3-2*fy),sz=fz*fz*(3-2*fz);
+  const n000=hash(ix,iy,iz),n100=hash(ix+1,iy,iz);
+  const n010=hash(ix,iy+1,iz),n110=hash(ix+1,iy+1,iz);
+  const n001=hash(ix,iy,iz+1),n101=hash(ix+1,iy,iz+1);
+  const n011=hash(ix,iy+1,iz+1),n111=hash(ix+1,iy+1,iz+1);
+  const n00=n000+(n100-n000)*sx,n01=n001+(n101-n001)*sx;
+  const n10=n010+(n110-n010)*sx,n11=n011+(n111-n011)*sx;
+  const n0=n00+(n10-n00)*sy,n1=n01+(n11-n01)*sy;
+  return n0+(n1-n0)*sz;
 }
 
-function fbm(x: number, y: number, z: number, oct = 4): number {
-  let value = 0;
-  let amp = 1;
-  let freq = 1;
-  let total = 0;
-  for (let i = 0; i < oct; i++) {
-    value += noise3d(x * freq, y * freq, z * freq) * amp;
-    total += amp;
-    amp *= 0.5;
-    freq *= 2;
-  }
-  return value / total;
+function fbm(x: number, y: number, z: number, oct=4): number {
+  let v=0,a=1,f=1,t=0;
+  for(let i=0;i<oct;i++){v+=noise3d(x*f,y*f,z*f)*a;t+=a;a*=0.5;f*=2;}
+  return v/t;
 }
 
-function influence(
-  dir: [number, number, number],
-  target: [number, number, number],
-  threshold: number,
-) {
-  const d = dot(dir, target);
-  if (d <= threshold) return 0;
-  const t = (d - threshold) / (1 - threshold);
-  return t * t;
+function influence(dir: [number,number,number], target: [number,number,number], threshold: number) {
+  const d=dot3(dir,target);
+  if(d<=threshold) return 0;
+  const t=(d-threshold)/(1-threshold);
+  return t*t;
 }
 
-function terrainHeight(nx: number, ny: number, nz: number) {
-  const dir: [number, number, number] = [nx, ny, nz];
+/* ═══════ TERRENO ═══════ */
+function terrainHeight(nx: number, ny: number, nz: number): number {
+  const dir: [number,number,number] = [nx,ny,nz];
+  const base = (fbm(nx*1.6, ny*1.6, nz*1.6, 4) - 0.5) * 4.5
+             + (fbm(nx*4.2+10, ny*4.2, nz*4.2, 3) - 0.5) * 2;
 
-  const rollingA = (fbm(nx * 1.6, ny * 1.6, nz * 1.6, 4) - 0.5) * 4.5;
-  const rollingB = (fbm(nx * 4.2 + 10, ny * 4.2, nz * 4.2, 3) - 0.5) * 2.0;
-  const base = rollingA + rollingB;
+  const peaks = influence(dir, PEAK_1, 0.955) * 18
+              + influence(dir, PEAK_2, 0.952) * 15
+              + influence(dir, PEAK_3, 0.958) * 20;
 
-  // 3 picos grandes, bem definidos
-  const peak1 = influence(dir, PEAK_1, 0.955) * 18;
-  const peak2 = influence(dir, PEAK_2, 0.952) * 15;
-  const peak3 = influence(dir, PEAK_3, 0.958) * 20;
-  const peaks = peak1 + peak2 + peak3;
+  // Grande buraco — mais profundo e com borda
+  const holeFactor = influence(dir, HOLE_DIR, 0.92);
+  const holeDeep = influence(dir, HOLE_DIR, 0.95);
+  const bigHole = -holeDeep * 18 + (holeFactor - holeDeep) * 5;
 
-  // grande buraco único com borda elevada
-  const holeCore = influence(dir, HOLE_DIR, 0.94) * -14;
-  const holeRimOuter = influence(dir, HOLE_DIR, 0.90) * 6;
-  const holeRimInner = influence(dir, HOLE_DIR, 0.94) * 6;
-  const bigHole = holeCore + (holeRimOuter - holeRimInner);
-
-  // pequenas crateras rochosas espalhadas
-  const pitsNoise = fbm(nx * 3.5 + 50, ny * 3.5 + 50, nz * 3.5 + 50, 3);
-  const pits = pitsNoise > 0.73 ? -(pitsNoise - 0.73) * 4 : 0;
+  const pN = fbm(nx*3.5+50, ny*3.5+50, nz*3.5+50, 3);
+  const pits = pN > 0.73 ? -(pN-0.73)*4 : 0;
 
   return base + peaks + bigHole + pits;
 }
@@ -125,19 +109,13 @@ function terrainColor(h: number, n: number, weather: WeatherType): THREE.Color {
   if (weather === "snow" || weather === "storm") {
     if (h > -1) return n > 0.45 ? C.snow1 : C.snow2;
   }
-
-  // neve apenas nos topos bem altos
-  if (h > 11) return n > 0.45 ? C.snow1 : C.snow2;
-  // pedra nas montanhas
-  if (h > 6.5) return n > 0.55 ? C.stone1 : C.stone2;
-  // encostas altas misturam pedra e verde escuro
-  if (h > 4) return n > 0.6 ? C.stone1 : C.grass4;
-  // fundo do grande buraco / crateras
-  if (h < -4) return n > 0.5 ? C.stone2 : C.stone3;
+  if (h > 11)   return n > 0.45 ? C.snow1 : C.snow2;
+  if (h > 6.5)  return n > 0.55 ? C.stone1 : C.stone2;
+  if (h > 4)    return n > 0.6 ? C.stone1 : C.grass4;
+  if (h < -8)   return n > 0.5 ? C.stoneHole : C.stone3;
+  if (h < -4)   return n > 0.5 ? C.stone2 : C.stone3;
   if (h < -1.5) return n > 0.5 ? C.dirt1 : C.stone2;
-
   if (weather === "rain" && h < 1.5) return n > 0.5 ? C.mud : C.dirt1;
-
   if (n > 0.87) return C.dirt2;
   if (n > 0.62) return C.grass1;
   if (n > 0.35) return C.grass2;
@@ -145,166 +123,173 @@ function terrainColor(h: number, n: number, weather: WeatherType): THREE.Color {
   return C.grass4;
 }
 
-type VoxelData = { pos: [number, number, number]; color: THREE.Color };
+/* ═══════ HELPERS ═══════ */
+type VD = { pos: [number,number,number]; color: THREE.Color };
 
-function addVoxel(
-  x: number,
-  y: number,
-  z: number,
-  color: THREE.Color,
-  data: VoxelData[],
-  occupied: Set<string>,
-) {
+function addV(x: number, y: number, z: number, color: THREE.Color, data: VD[], occ: Set<string>) {
   const key = `${x},${y},${z}`;
-  if (occupied.has(key)) return;
-  occupied.add(key);
-  data.push({ pos: [x, y, z], color });
+  if (occ.has(key)) return;
+  occ.add(key);
+  data.push({ pos: [x,y,z], color });
 }
 
-function addGreatTree(data: VoxelData[], occupied: Set<string>) {
+/* ═══════ GRANDE ÁRVORE MONUMENTAL ═══════ */
+function addGreatTree(data: VD[], occ: Set<string>) {
   const [nx, ny, nz] = TREE_DIR;
   const h = terrainHeight(nx, ny, nz);
-  const surfaceDist = R + h;
-  const bx = Math.round(nx * surfaceDist);
-  const by = Math.round(ny * surfaceDist);
-  const bz = Math.round(nz * surfaceDist);
+  const surfR = R + h;
+  const bx = nx * surfR, by = ny * surfR, bz = nz * surfR;
 
-  // tronco gigante: 12 blocos radiais
-  const trunkH = 12;
-  for (let t = 1; t <= trunkH; t++) {
-    const tx = Math.round(bx + nx * t);
-    const ty = Math.round(by + ny * t);
-    const tz = Math.round(bz + nz * t);
-    addVoxel(tx, ty, tz, C.trunk, data, occupied);
-
-    // engrossa o tronco com vizinhos próximos
-    addVoxel(tx + 1, ty, tz, C.trunk, data, occupied);
-    addVoxel(tx - 1, ty, tz, C.trunk, data, occupied);
-    addVoxel(tx, ty + 1, tz, C.trunk, data, occupied);
-    addVoxel(tx, ty, tz + 1, C.trunk, data, occupied);
-  }
-
-  const cx = bx + nx * (trunkH + 2);
-  const cy = by + ny * (trunkH + 2);
-  const cz = bz + nz * (trunkH + 2);
-  const crownR = 5;
-
-  for (let dx = -crownR; dx <= crownR; dx++) {
-    for (let dy = -crownR; dy <= crownR; dy++) {
-      for (let dz = -crownR; dz <= crownR; dz++) {
-        const dd = dx * dx + dy * dy + dz * dz;
-        if (dd <= crownR * crownR + 2 && hash(dx + 99, dy + 33, dz + 77) > 0.14) {
-          const ln = hash(dx + bx, dy + by, dz + bz);
-          addVoxel(
-            Math.round(cx + dx),
-            Math.round(cy + dy),
-            Math.round(cz + dz),
-            ln > 0.62 ? C.leaf1 : ln > 0.36 ? C.leaf2 : C.leaf3,
-            data,
-            occupied,
-          );
-        }
-      }
-    }
-  }
-}
-
-function generatePlanet(weather: WeatherType) {
-  const data: VoxelData[] = [];
-  const occupied = new Set<string>();
-
-  for (let x = -MAX_R; x <= MAX_R; x++) {
-    for (let y = -MAX_R; y <= MAX_R; y++) {
-      for (let z = -MAX_R; z <= MAX_R; z++) {
-        const dist = Math.sqrt(x * x + y * y + z * z);
-        if (dist < R - 3 || dist > MAX_R) continue;
-
-        const nx = x / dist;
-        const ny = y / dist;
-        const nz = z / dist;
-        const h = terrainHeight(nx, ny, nz);
-        const surfaceDist = R + h;
-
-        // casca principal mais espessa = sem furos
-        if (dist >= surfaceDist - 2.4 && dist <= surfaceDist + 0.35) {
-          const n = hash(x, y, z);
-          addVoxel(x, y, z, terrainColor(h, n, weather), data, occupied);
+  // Tronco maciço: 16 blocos de alto, raio 2 (cross section)
+  const trunkH = 16;
+  const trunkRadius = 2;
+  for (let t = 0; t <= trunkH; t++) {
+    const cx = bx + nx * t, cy = by + ny * t, cz = bz + nz * t;
+    // Gera seção transversal perpendicular ao eixo radial
+    for (let dx = -trunkRadius; dx <= trunkRadius; dx++) {
+      for (let dy = -trunkRadius; dy <= trunkRadius; dy++) {
+        for (let dz = -trunkRadius; dz <= trunkRadius; dz++) {
+          const dd = dx*dx + dy*dy + dz*dz;
+          // Raio do tronco diminui perto do topo
+          const maxR = t > trunkH - 3 ? 1 : trunkRadius;
+          if (dd <= maxR * maxR) {
+            const n = hash(dx+t*7, dy+t*3, dz+t*11);
+            addV(Math.round(cx+dx), Math.round(cy+dy), Math.round(cz+dz),
+              n > 0.7 ? C.bark : n > 0.3 ? C.trunk : C.trunkDark, data, occ);
+          }
         }
       }
     }
   }
 
-  // árvores regulares espalhadas
-  let trees = 0;
-  const treeLimit = 95;
-  for (let i = 0; i < data.length; i += 40) {
-    if (trees >= treeLimit) break;
-    const v = data[i];
-    const color = v.color;
-    const isGrass =
-      color === C.grass1 || color === C.grass2 || color === C.grass3 || color === C.grass4;
-    if (!isGrass) continue;
-
-    const [x, y, z] = v.pos;
-    const n = hash(x + 7, y + 3, z + 11);
-    if (n < 0.88) continue;
-
-    const dist = Math.sqrt(x * x + y * y + z * z);
-    const ux = x / dist, uy = y / dist, uz = z / dist;
-    const trunkH = 3 + Math.floor(n * 3);
-
-    for (let t = 1; t <= trunkH; t++) {
-      addVoxel(
-        Math.round(x + ux * t),
-        Math.round(y + uy * t),
-        Math.round(z + uz * t),
-        C.trunk,
-        data,
-        occupied,
-      );
+  // Raízes que saem da base (4 raízes)
+  for (let r = 0; r < 4; r++) {
+    const angle = (r / 4) * Math.PI * 2;
+    for (let seg = 0; seg < 6; seg++) {
+      const spread = seg * 1.5;
+      const rx = Math.round(bx + Math.cos(angle) * spread - nx * seg * 0.3);
+      const ry = Math.round(by + Math.sin(angle) * spread * 0.5 - ny * seg * 0.3);
+      const rz = Math.round(bz + Math.sin(angle) * spread - nz * seg * 0.3);
+      addV(rx, ry, rz, C.trunkDark, data, occ);
+      addV(rx+1, ry, rz, C.trunk, data, occ);
+      addV(rx, ry, rz+1, C.trunk, data, occ);
     }
+  }
 
-    const cx = x + ux * (trunkH + 1.5);
-    const cy = y + uy * (trunkH + 1.5);
-    const cz = z + uz * (trunkH + 1.5);
-    const cr = 2;
+  // Copa enorme — 3 camadas de esferas de folhas sobrepostas
+  const topCenter = { x: bx + nx * (trunkH + 3), y: by + ny * (trunkH + 3), z: bz + nz * (trunkH + 3) };
 
+  const crowns: { cx: number; cy: number; cz: number; r: number }[] = [
+    { cx: topCenter.x, cy: topCenter.y, cz: topCenter.z, r: 7 },
+    { cx: topCenter.x + nx * 4, cy: topCenter.y + ny * 4, cz: topCenter.z + nz * 4, r: 5 },
+    { cx: topCenter.x - nx * 2 + 3, cy: topCenter.y - ny * 2 + 2, cz: topCenter.z - nz * 2 + 3, r: 5 },
+    { cx: topCenter.x + 4, cy: topCenter.y + 1, cz: topCenter.z - 3, r: 4 },
+    { cx: topCenter.x - 3, cy: topCenter.y + 2, cz: topCenter.z + 4, r: 4 },
+  ];
+
+  for (const crown of crowns) {
+    const cr = crown.r;
     for (let dx = -cr; dx <= cr; dx++) {
       for (let dy = -cr; dy <= cr; dy++) {
         for (let dz = -cr; dz <= cr; dz++) {
-          if (dx * dx + dy * dy + dz * dz <= cr * cr + 1 && hash(dx + x, dy + y, dz + z) > 0.2) {
-            const ln = hash(dx + x * 3, dy + y * 3, dz + z * 3);
-            addVoxel(
-              Math.round(cx + dx),
-              Math.round(cy + dy),
-              Math.round(cz + dz),
-              ln > 0.6 ? C.leaf1 : ln > 0.35 ? C.leaf2 : C.leaf3,
-              data,
-              occupied,
+          const dd = dx*dx + dy*dy + dz*dz;
+          if (dd <= cr*cr && hash(dx+99+crown.r, dy+33, dz+77) > 0.15) {
+            const ln = hash(dx*3+1, dy*3+2, dz*3+3);
+            addV(
+              Math.round(crown.cx + dx), Math.round(crown.cy + dy), Math.round(crown.cz + dz),
+              ln > 0.65 ? C.leafBright : ln > 0.45 ? C.leaf1 : ln > 0.25 ? C.leaf2 : C.leaf3,
+              data, occ,
             );
           }
         }
       }
     }
+  }
+}
+
+/* ═══════ GERAÇÃO DO PLANETA ═══════ */
+function generatePlanet(weather: WeatherType): VD[] {
+  const data: VD[] = [];
+  const occ = new Set<string>();
+
+  // Pré-calcula heights para cada coordenada esférica
+  // Loop cúbico para casca sólida
+  for (let x = -MAX_R; x <= MAX_R; x++) {
+    for (let y = -MAX_R; y <= MAX_R; y++) {
+      for (let z = -MAX_R; z <= MAX_R; z++) {
+        const distSq = x*x + y*y + z*z;
+        // Pula o que está claramente fora ou dentro
+        const minBound = R - 4;
+        const maxBound = MAX_R;
+        if (distSq < minBound * minBound || distSq > maxBound * maxBound) continue;
+
+        const dist = Math.sqrt(distSq);
+        const nx = x / dist, ny = y / dist, nz = z / dist;
+        const h = terrainHeight(nx, ny, nz);
+        const surfaceDist = R + h;
+
+        // Casca sólida: tudo entre o interior e a superfície
+        // Isso garante ZERO buracos — preenchemos de (surfaceDist - 3) até surfaceDist
+        if (dist >= surfaceDist - 3 && dist <= surfaceDist + 0.4) {
+          const n = hash(x, y, z);
+          // Voxels internos (abaixo da superfície) usam cor de pedra
+          const isInner = dist < surfaceDist - 0.8;
+          const color = isInner ? (n > 0.5 ? C.stone2 : C.stone3) : terrainColor(h, n, weather);
+          addV(x, y, z, color, data, occ);
+        }
+      }
+    }
+  }
+
+  // Árvores normais
+  let trees = 0;
+  for (let i = 0; i < data.length; i += 45) {
+    if (trees >= 80) break;
+    const v = data[i];
+    const isGrass = v.color === C.grass1 || v.color === C.grass2 || v.color === C.grass3 || v.color === C.grass4;
+    if (!isGrass) continue;
+
+    const [px, py, pz] = v.pos;
+    const n = hash(px+7, py+3, pz+11);
+    if (n < 0.88) continue;
+
+    const dist = Math.sqrt(px*px+py*py+pz*pz);
+    const ux=px/dist, uy=py/dist, uz=pz/dist;
+    const trunkH = 3 + Math.floor(n*3);
+
+    for (let t = 1; t <= trunkH; t++) {
+      addV(Math.round(px+ux*t), Math.round(py+uy*t), Math.round(pz+uz*t), C.trunk, data, occ);
+    }
+
+    const cx = px+ux*(trunkH+1.5), cy = py+uy*(trunkH+1.5), cz = pz+uz*(trunkH+1.5);
+    for (let dx=-2; dx<=2; dx++)
+    for (let dy=-2; dy<=2; dy++)
+    for (let dz=-2; dz<=2; dz++) {
+      if (dx*dx+dy*dy+dz*dz <= 5 && hash(dx+px,dy+py,dz+pz) > 0.2) {
+        const ln = hash(dx*3+px, dy*3+py, dz*3+pz);
+        addV(Math.round(cx+dx), Math.round(cy+dy), Math.round(cz+dz),
+          ln>0.6?C.leaf1:ln>0.35?C.leaf2:C.leaf3, data, occ);
+      }
+    }
     trees++;
   }
 
-  // grande árvore única de destaque
-  addGreatTree(data, occupied);
+  // Grande árvore monumental
+  addGreatTree(data, occ);
 
   return data;
 }
 
-function VoxelInstances({ voxels }: { voxels: VoxelData[] }) {
+/* ═══════ INSTANCED MESH ═══════ */
+function VoxelInstances({ voxels }: { voxels: VD[] }) {
   const ref = useRef<THREE.InstancedMesh>(null!);
   useLayoutEffect(() => {
     const dummy = new THREE.Object3D();
     for (let i = 0; i < voxels.length; i++) {
-      const v = voxels[i];
-      dummy.position.set(v.pos[0], v.pos[1], v.pos[2]);
+      dummy.position.set(voxels[i].pos[0], voxels[i].pos[1], voxels[i].pos[2]);
       dummy.updateMatrix();
       ref.current.setMatrixAt(i, dummy.matrix);
-      ref.current.setColorAt(i, v.color);
+      ref.current.setColorAt(i, voxels[i].color);
     }
     ref.current.instanceMatrix.needsUpdate = true;
     if (ref.current.instanceColor) ref.current.instanceColor.needsUpdate = true;
@@ -318,50 +303,76 @@ function VoxelInstances({ voxels }: { voxels: VoxelData[] }) {
   );
 }
 
+/* ═══════ ATMOSFERA REATIVA (sem useMemo — atualiza a cada frame) ═══════ */
 function Atmosphere() {
+  const { scene } = useThree();
+  const bgRef = useRef(new THREE.Color("#070e2b"));
+
+  useFrame(() => {
+    scene.background = bgRef.current;
+  });
+
+  return <AtmosphereUpdater bgRef={bgRef} />;
+}
+
+function AtmosphereUpdater({ bgRef }: { bgRef: React.RefObject<THREE.Color> }) {
   const { hour, weather } = useGameState();
   const { scene } = useThree();
 
-  const bg = useMemo(() => {
-    if (weather === "storm") return "#0a0a0f";
-    if (weather === "fog") return "#1e293b";
-    if (hour >= 0 && hour < 5) return "#020408";
-    if (hour >= 5 && hour < 8) return "#1e1b4b";
-    if (hour >= 8 && hour < 16) return "#070e2b";
-    if (hour >= 16 && hour < 19) return "#1a1040";
-    return "#020408";
-  }, [hour, weather]);
-
+  // Atualiza cor do fundo e névoa a cada mudança de hour ou weather
   useLayoutEffect(() => {
+    let bg: string;
+    if (weather === "storm") bg = "#0a0a0f";
+    else if (weather === "fog") bg = "#1e293b";
+    else if (hour >= 0 && hour < 5) bg = "#020408";
+    else if (hour >= 5 && hour < 7) bg = "#1a0e3a";
+    else if (hour >= 7 && hour < 8) bg = "#1e1b4b";
+    else if (hour >= 8 && hour < 11) bg = "#0c1445";
+    else if (hour >= 11 && hour < 16) bg = "#070e2b";
+    else if (hour >= 16 && hour < 18) bg = "#1a1040";
+    else if (hour >= 18 && hour < 20) bg = "#12082a";
+    else bg = "#020408";
+
+    if (bgRef.current) bgRef.current.set(bg);
+
     if (weather === "fog") scene.fog = new THREE.Fog("#334155", R * 0.8, R * 3);
     else if (weather === "storm") scene.fog = new THREE.Fog("#0f172a", R, R * 3.5);
     else scene.fog = null;
-  }, [weather, scene]);
+  }, [hour, weather, scene, bgRef]);
 
-  return <color attach="background" args={[bg]} />;
+  return null;
 }
 
+/* ═══════ SOL DINÂMICO ═══════ */
 function SunLight() {
   const { hour, weather } = useGameState();
   const ref = useRef<THREE.DirectionalLight>(null!);
+  const ambRef = useRef<THREE.AmbientLight>(null!);
 
   useFrame(() => {
     if (!ref.current) return;
     const angle = ((hour - 6) / 24) * Math.PI * 2;
     const d = R * 4;
-    ref.current.position.set(
-      Math.cos(angle) * d,
-      Math.sin(angle) * d,
-      Math.sin(angle) * d * 0.4,
-    );
+    ref.current.position.set(Math.cos(angle)*d, Math.sin(angle)*d, Math.sin(angle)*d*0.4);
     const day = Math.max(0, Math.sin(angle));
-    const dim = weather === "storm" ? 0.25 : weather === "fog" ? 0.5 : 1;
-    ref.current.intensity = (0.2 + day * 1.4) * dim;
+    const dim = weather==="storm"?0.25:weather==="fog"?0.5:1;
+    ref.current.intensity = (0.15 + day * 1.5) * dim;
+
+    // Ambient também muda com hora
+    if (ambRef.current) {
+      ambRef.current.intensity = (0.2 + day * 0.4) * dim;
+    }
   });
 
-  return <directionalLight ref={ref} color="#fef3c7" />;
+  return (
+    <>
+      <directionalLight ref={ref} color="#fef3c7" />
+      <ambientLight ref={ambRef} intensity={0.45} />
+    </>
+  );
 }
 
+/* ═══════ PLANETA ═══════ */
 function PlanetGroup({ weather }: { weather: WeatherType }) {
   const ref = useRef<THREE.Group>(null!);
   const voxels = useMemo(() => generatePlanet(weather), [weather]);
@@ -377,6 +388,7 @@ function PlanetGroup({ weather }: { weather: WeatherType }) {
   );
 }
 
+/* ═══════ CANVAS ═══════ */
 export default function VoxelPlanet() {
   const { weather, weatherPanelOpen, diaryOpen } = useGameState();
   const orbitEnabled = !weatherPanelOpen && !diaryOpen;
@@ -385,8 +397,7 @@ export default function VoxelPlanet() {
     <div className="absolute inset-0">
       <Canvas camera={{ position: [0, 15, R * 2.8], fov: 45 }} dpr={[1, 1.5]}>
         <Atmosphere />
-        <ambientLight intensity={0.45} />
-        <hemisphereLight args={["#bfdbfe", "#1e293b", 0.3]} />
+        <hemisphereLight args={["#bfdbfe", "#1e293b", 0.25]} />
         <SunLight />
         <PlanetGroup weather={weather} />
         <Stars radius={R * 6} depth={R * 2} count={5000} factor={6} fade speed={0.3} />
