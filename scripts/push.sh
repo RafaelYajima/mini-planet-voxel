@@ -19,14 +19,21 @@ fi
 
 git add -A
 
+# Só cria commit se houver arquivos alterados (commits vazios/anteriores também precisam de push)
 if git diff --cached --quiet; then
-  echo "Nada novo para commitar."
-  exit 0
+  echo "Sem alterações de arquivo; enviando commits já existentes (se houver)."
+else
+  git commit -m "$MSG"
 fi
 
-git commit -m "$MSG"
-
 BRANCH="$(git branch --show-current)"
+
+# Nada a enviar: working tree limpo e nenhum commit local à frente do remoto
+git fetch origin "$BRANCH" --quiet 2>/dev/null || true
+if git diff --quiet "@{upstream}" HEAD 2>/dev/null; then
+  echo "Tudo sincronizado com o GitHub. Nada a enviar."
+  exit 0
+fi
 
 if [ -n "${GITHUB_TOKEN:-}" ]; then
   # GitHub exige Basic auth (base64 de "x-access-token:TOKEN") para git over HTTPS
