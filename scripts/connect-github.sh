@@ -60,8 +60,11 @@ BRANCH="$(git branch --show-current || echo main)"
 git add -A
 git diff --cached --quiet || git commit -m "chore: setup inicial do Mini-planet Voxel"
 
+# GitHub exige Basic auth (base64 de "x-access-token:TOKEN") para git over HTTPS
+BASIC_AUTH=$(printf 'x-access-token:%s' "${GITHUB_TOKEN}" | base64 -w0)
+
 echo "Enviando código para o GitHub..."
-git -c http.extraHeader="AUTHORIZATION: Bearer ${GITHUB_TOKEN}" push -u origin "${BRANCH}"
+GIT_TERMINAL_PROMPT=0 git -c http.extraHeader="AUTHORIZATION: basic ${BASIC_AUTH}" push -u origin "${BRANCH}"
 
 echo ""
 echo "Conectado! Daqui em diante, todo fim de sessão: bash scripts/push.sh \"mensagem\""

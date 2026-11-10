@@ -29,7 +29,9 @@ git commit -m "$MSG"
 BRANCH="$(git branch --show-current)"
 
 if [ -n "${GITHUB_TOKEN:-}" ]; then
-  git -c http.extraHeader="AUTHORIZATION: Bearer ${GITHUB_TOKEN}" push -u origin "$BRANCH"
+  # GitHub exige Basic auth (base64 de "x-access-token:TOKEN") para git over HTTPS
+  BASIC_AUTH=$(printf 'x-access-token:%s' "${GITHUB_TOKEN}" | base64 -w0)
+  GIT_TERMINAL_PROMPT=0 git -c http.extraHeader="AUTHORIZATION: basic ${BASIC_AUTH}" push -u origin "$BRANCH"
 else
   git push -u origin "$BRANCH"
 fi
