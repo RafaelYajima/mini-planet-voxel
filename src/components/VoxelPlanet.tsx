@@ -221,6 +221,43 @@ function addColossalTree(data: VD[], occ: Set<string>) {
   }
 }
 
+/* ═══════ CHÃO DA CRATERA (plano explícito) ═══════ */
+function addCraterFloor(data: VD[], occ: Set<string>) {
+  // Ponto central da cratera na superfície do planeta
+  const [nx, ny, nz] = HOLE_DIR;
+  const centerDist = R - 12; // 12 unidades abaixo da superfície = fundo da cratera
+  const cx = nx * centerDist;
+  const cy = ny * centerDist;
+  const cz = nz * centerDist;
+
+  // Duas direções perpendiculares à normal (para varrer o plano do chão)
+  // Encontra vetores ortogonais ao HOLE_DIR
+  const up: [number,number,number] = Math.abs(ny) < 0.9 ? [0,1,0] : [1,0,0];
+  const t1x = ny*up[2]-nz*up[1], t1y = nz*up[0]-nx*up[2], t1z = nx*up[1]-ny*up[0];
+  const t1len = Math.sqrt(t1x*t1x+t1y*t1y+t1z*t1z);
+  const e1: [number,number,number] = [t1x/t1len, t1y/t1len, t1z/t1len];
+  const e2x = ny*e1[2]-nz*e1[1], e2y = nz*e1[0]-nx*e1[2], e2z = nx*e1[1]-ny*e1[0];
+  const e2len = Math.sqrt(e2x*e2x+e2y*e2y+e2z*e2z);
+  const e2: [number,number,number] = [e2x/e2len, e2y/e2len, e2z/e2len];
+
+  // Preenche disco de raio 9 no plano do fundo
+  const floorR = 9;
+  for (let u = -floorR; u <= floorR; u++) {
+    for (let v = -floorR; v <= floorR; v++) {
+      if (u*u + v*v > floorR*floorR) continue;
+      // Coloca 2 camadas de espessura para garantir visibilidade
+      for (let d = 0; d <= 2; d++) {
+        const wx = Math.round(cx + e1[0]*u + e2[0]*v + nx*d);
+        const wy = Math.round(cy + e1[1]*u + e2[1]*v + ny*d);
+        const wz = Math.round(cz + e1[2]*u + e2[2]*v + nz*d);
+        const n = hash(wx, wy, wz);
+        const col = n > 0.6 ? C.craterFloor : n > 0.3 ? C.stone2 : C.stoneDeep;
+        addV(wx, wy, wz, col, data, occ);
+      }
+    }
+  }
+}
+
 /* ═══════ GERAÇÃO ═══════ */
 function generatePlanet(weather: WeatherType): VD[] {
   const data: VD[]=[];
@@ -234,7 +271,7 @@ function generatePlanet(weather: WeatherType): VD[] {
   // Primeiro: marcar todos os pontos sólidos
   const solidSet = new Set<string>();
   const maxR = R + 25;
-  const minR = R - 5;
+  const minR = R - 15; // expandido para cobrir o fundo da cratera
 
   for(let x=-maxR;x<=maxR;x++)
   for(let y=-maxR;y<=maxR;y++)
@@ -301,6 +338,7 @@ function generatePlanet(weather: WeatherType): VD[] {
   }
 
   addColossalTree(data,occ);
+  addCraterFloor(data,occ);
   return data;
 }
 
