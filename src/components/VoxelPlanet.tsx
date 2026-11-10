@@ -1,146 +1,320 @@
 "use client";
 
-import { useLayoutEffect, useMemo, useRef } from "react";
+import { useLayoutEffect, useMemo, useRef, useCallback } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { Stars, Sparkles, OrbitControls } from "@react-three/drei";
 import * as THREE from "three";
 import { useGameState } from "@/context/GameContext";
 import type { WeatherType, ZoomLevel } from "@/store/gameStore";
 
-/* ─── Paletas de cor por bioma / clima ─── */
-const PALETTE = {
-  grass:  new THREE.Color("#4ade80"),
-  grass2: new THREE.Color("#22c55e"),
-  dirt:   new THREE.Color("#92400e"),
-  stone:  new THREE.Color("#94a3b8"),
-  water:  new THREE.Color("#38bdf8"),
-  snow:   new THREE.Color("#e0f2fe"),
-  mud:    new THREE.Color("#78350f"),
-  sand:   new THREE.Color("#fcd34d"),
-  trunk:  new THREE.Color("#713f12"),
-  leaf:   new THREE.Color("#15803d"),
-  fog:    new THREE.Color("#94a3b8"),
+/* ═══════════════════════════════════════════════════════
+   CONSTANTES DO PLANETA
+   ═══════════════════════════════════════════════════════ */
+const R = 120; // Raio em voxels — planeta massivo tipo Terra
+
+/* ═══════════════════════════════════════════════════════
+   PALETA DE CORES
+   ═══════════════════════════════════════════════════════ */
+const C = {
+  grass1:    new THREE.Color("#4ade80"),
+  grass2:    new THREE.Color("#22c55e"),
+  grass3:    new THREE.Color("#16a34a"),
+  grassDark: new THREE.Color("#15803d"),
+  dirt1:     new THREE.Color("#92400e"),
+  dirt2:     new THREE.Color("#78350f"),
+  stone1:    new THREE.Color("#6b7280"),
+  stone2:    new THREE.Color("#4b5563"),
+  stone3:    new THREE.Color("#374151"),
+  snow1:     new THREE.Color("#e0f2fe"),
+  snow2:     new THREE.Color("#f0f9ff"),
+  mud:       new THREE.Color("#5c2d0a"),
+  sand:      new THREE.Color("#d4a855"),
+  trunk:     new THREE.Color("#5c3317"),
+  leaf1:     new THREE.Color("#15803d"),
+  leaf2:     new THREE.Color("#166534"),
+  leaf3:     new THREE.Color("#14532d"),
+  water:     new THREE.Color("#0ea5e9"),
 };
 
-/* ─── Ruído pseudo-randômico determinístico ─── */
-function hash(x: number, y: number, z: number) {
-  const s = Math.sin(x * 12.98 + y * 78.23 + z * 37.71) * 43758.54;
-  return s - Math.floor(s);
+/* ═══════════════════════════════════════════════════════
+   RUÍDO PROCEDURAL
+   ═══════════════════════════════════════════════════════ */
+function hash(x: number, y: number, z: number): number {
+  let h = x * 374761393 + y * 668265263 + z * 1274126177;
+  h = (h ^ (h >> 13)) * 1103515245;
+  return ((h ^ (h >> 16)) & 0x7fffffff) / 0x7fffffff;
 }
 
-/* ─── Cor de um voxel de superfície ─── */
-function surfaceColor(
-  x: number, y: number, z: number,
-  weather: WeatherType
-): THREE.Color {
-  const n = hash(x, y, z);
-  if (weather === "snow" || weather === "storm") {
-    if (y >= 0) return PALETTE.snow;
+// Ruído fractal simples baseado em hash (simula Perlin básico)
+function noise3d(x: number, y: number, z: number): number {
+  const ix = Math.floor(x), iy = Math.floor(y), iz = Math.floor(z);
+  const fx = x - ix, fy = y - iy, fz = z - iz;
+  const sx = fx * fx * (3 - 2 * fx);
+  const sy = fy * fy * (3 - 2 * fy);
+  const sz = fz * fz * (3 - 2 * fz);
+
+  const n000 = hash(ix, iy, iz);
+  const n100 = hash(ix + 1, iy, iz);
+  const n010 = hash(ix, iy + 1, iz);
+  const n110 = hash(ix + 1, iy + 1, iz);
+  const n001 = hash(ix, iy, iz + 1);
+  const n101 = hash(ix + 1, iy, iz + 1);
+  const n011 = hash(ix, iy + 1, iz + 1);
+  const n111 = hash(ix + 1, iy + 1, iz + 1);
+
+  const n00 = n000 + (n100 - n000) * sx;
+  const n01 = n001 + (n101 - n001) * sx;
+  const n10 = n010 + (n110 - n010) * sx;
+  const n11 = n011 + (n111 - n011) * sx;
+
+  const n0 = n00 + (n10 - n00) * sy;
+  const n1 = n01 + (n11 - n01) * sy;
+
+  return n0 + (n1 - n0) * sz;
+}
+
+// FBM (Fractal Brownian Motion) para terreno rico
+function fbm(x: number, y: number, z: number, octaves = 4): number {
+  let val = 0, amp = 1, freq = 1, totalAmp = 0;
+  for (let i = 0; i < octaves; i++) {
+    val += noise3d(x * freq, y * freq, z * freq) * amp;
+    totalAmp += amp;
+    amp *= 0.5;
+    freq *= 2;
   }
-  if (weather === "rain" && y <= -2) return PALETTE.mud;
-  if (y >= 5)  return PALETTE.snow;
-  if (y <= -4) return n > 0.5 ? PALETTE.sand : PALETTE.stone;
-  if (n > 0.92) return PALETTE.stone;
-  if (n < 0.07) return PALETTE.water;
-  return n > 0.5 ? PALETTE.grass : PALETTE.grass2;
+  return val / totalAmp;
 }
 
-type VoxelData = { pos: [number,number,number]; color: THREE.Color };
+/* ═══════════════════════════════════════════════════════
+   GERAÇÃO DA SUPERFÍCIE (abordagem esférica)
+   ═══════════════════════════════════════════════════════ */
+type VoxelData = { pos: [number, number, number]; color: THREE.Color };
 
-/* ─── Gera os voxels do planeta (Otimizado para escala R=40) ─── */
-function generatePlanet(weather: WeatherType, seed = 1337): VoxelData[] {
-  const R = 40; // Planeta ~7x maior em raio (~350x mais volume)
+function heightAt(theta: number, phi: number): number {
+  // Converte esférica para cartesiana para amostrar ruído 3D
+  const nx = Math.sin(theta) * Math.cos(phi);
+  const ny = Math.cos(theta);
+  const nz = Math.sin(theta) * Math.sin(phi);
+
+  // FBM multi-octave para terreno interessante
+  const baseHeight = fbm(nx * 3.5, ny * 3.5, nz * 3.5, 5);
+
+  // Montanhas (picos altos)
+  const mountainNoise = fbm(nx * 1.2 + 100, ny * 1.2, nz * 1.2, 4);
+  const mountains = Math.pow(Math.max(0, mountainNoise - 0.45), 2) * 80;
+
+  // Crateras (depressões)
+  const craterNoise = fbm(nx * 2 + 50, ny * 2 + 50, nz * 2 + 50, 3);
+  const craters = craterNoise > 0.65 ? -(craterNoise - 0.65) * 30 : 0;
+
+  return baseHeight * 12 + mountains + craters;
+}
+
+function surfaceColor(
+  height: number,
+  normalY: number,
+  n: number,
+  weather: WeatherType,
+): THREE.Color {
+  const absNY = Math.abs(normalY);
+
+  // Neve no clima de nevasca/tempestade
+  if (weather === "snow" || weather === "storm") {
+    if (absNY > 0.2) return n > 0.5 ? C.snow1 : C.snow2;
+  }
+
+  // Montanhas altas = neve permanente
+  if (height > 16) return n > 0.5 ? C.snow1 : C.snow2;
+
+  // Montanhas médias = pedra
+  if (height > 10) {
+    if (n > 0.7) return C.snow1; // manchas de neve
+    return n > 0.4 ? C.stone1 : C.stone2;
+  }
+
+  // Crateras profundas = pedra escura
+  if (height < -3) {
+    return n > 0.5 ? C.stone2 : C.stone3;
+  }
+
+  // Regiões baixas e chuva = lama
+  if (weather === "rain" && height < 2) {
+    return n > 0.5 ? C.mud : C.dirt2;
+  }
+
+  // Terra / Grama (a maioria da superfície)
+  if (height > 6) {
+    // Transição pedra/grama nas encostas
+    return n > 0.6 ? C.stone1 : C.grassDark;
+  }
+
+  // Planícies verdes
+  if (n > 0.8) return C.dirt1;
+  if (n > 0.5) return C.grass1;
+  if (n > 0.2) return C.grass2;
+  return C.grass3;
+}
+
+function generatePlanet(weather: WeatherType): VoxelData[] {
   const voxels: VoxelData[] = [];
-  let trees = 0;
-  const treeLimit = 180; // Mais árvores para a nova escala
 
-  // Usamos um passo maior ou lógica de shell para não estourar a memória
-  // Geramos apenas voxels onde a distância é próxima ao raio (casca)
-  for (let x = -R - 1; x <= R + 1; x++) {
-    for (let y = -R - 1; y <= R + 1; y++) {
-      // Otimização: se x e y estão longe da borda, z pode ser calculado ou filtrado
-      if (Math.abs(x) > R + 1 || Math.abs(y) > R + 1) continue;
-      
-      for (let z = -R - 1; z <= R + 1; z++) {
-        const dSq = x * x + y * y + z * z;
-        const rMinSq = (R - 1.1) * (R - 1.1);
-        const rMaxSq = (R + 0.5) * (R + 0.5);
+  // Resolução angular — quantos pontos amostramos na esfera
+  // Maior = mais detalhado mas mais voxels
+  const latSteps = 220;  // latitude
+  const lonSteps = 440;  // longitude
 
-        if (dSq >= rMinSq && dSq <= rMaxSq) {
-          voxels.push({
-            pos: [x, y, z],
-            color: surfaceColor(x + seed, y, z, weather),
-          });
-        }
-      }
+  for (let lat = 0; lat < latSteps; lat++) {
+    const theta = (lat / latSteps) * Math.PI;
+
+    for (let lon = 0; lon < lonSteps; lon++) {
+      const phi = (lon / lonSteps) * Math.PI * 2;
+
+      // Direção normal da superfície
+      const nx = Math.sin(theta) * Math.cos(phi);
+      const ny = Math.cos(theta);
+      const nz = Math.sin(theta) * Math.sin(phi);
+
+      // Altura do terreno neste ponto
+      const h = heightAt(theta, phi);
+      const surfaceR = R + h;
+
+      // Posição do voxel
+      const x = Math.round(nx * surfaceR);
+      const y = Math.round(ny * surfaceR);
+      const z = Math.round(nz * surfaceR);
+
+      // Ruído local para variação de cor
+      const n = hash(x, y, z);
+
+      voxels.push({
+        pos: [x, y, z],
+        color: surfaceColor(h, ny, n, weather),
+      });
     }
   }
 
-  // Árvores espalhadas
-  for (let i = 0; i < voxels.length; i += 15) {
+  // ─── Árvores robustas ───
+  let trees = 0;
+  const treeLimit = 400;
+
+  for (let i = 0; i < voxels.length; i += 40) {
     if (trees >= treeLimit) break;
     const v = voxels[i];
     const [x, y, z] = v.pos;
-    const n = hash(x, y, z);
-    
-    // Árvores nascem na grama (y > -10 e y < 30)
-    if (y > -10 && y < 30 && n > 0.985) {
-      voxels.push({ pos: [x, y + 1, z], color: PALETTE.trunk });
-      voxels.push({ pos: [x, y + 2, z], color: PALETTE.leaf });
-      voxels.push({ pos: [x, y + 3, z], color: PALETTE.leaf });
-      voxels.push({ pos: [x + 1, y + 2, z], color: PALETTE.leaf });
-      voxels.push({ pos: [x - 1, y + 2, z], color: PALETTE.leaf });
+    const n = hash(x + 7, y + 3, z + 11);
+
+    // Distância do centro
+    const dist = Math.sqrt(x * x + y * y + z * z);
+    // Normal aponta para fora
+    const ux = x / dist, uy = y / dist, uz = z / dist;
+
+    // Altura do terreno neste voxel
+    const terrainH = dist - R;
+
+    // Árvores só em grama (altura 0-8, não montanha nem cratera)
+    if (terrainH > 0 && terrainH < 8 && n > 0.93) {
+      // Tronco (3-5 blocos de alto)
+      const trunkH = 3 + Math.floor(n * 3);
+      for (let t = 1; t <= trunkH; t++) {
+        voxels.push({
+          pos: [
+            Math.round(x + ux * t),
+            Math.round(y + uy * t),
+            Math.round(z + uz * t),
+          ],
+          color: C.trunk,
+        });
+      }
+
+      // Copa (esfera de folhas)
+      const cx = x + ux * (trunkH + 1);
+      const cy = y + uy * (trunkH + 1);
+      const cz = z + uz * (trunkH + 1);
+      const crownR = 2 + Math.floor(n * 2);
+
+      for (let dx = -crownR; dx <= crownR; dx++) {
+        for (let dy = -crownR; dy <= crownR; dy++) {
+          for (let dz = -crownR; dz <= crownR; dz++) {
+            const dd = dx * dx + dy * dy + dz * dz;
+            if (dd <= crownR * crownR && hash(dx + x, dy + y, dz + z) > 0.25) {
+              const ln = hash(dx, dy, dz);
+              voxels.push({
+                pos: [
+                  Math.round(cx + dx),
+                  Math.round(cy + dy),
+                  Math.round(cz + dz),
+                ],
+                color: ln > 0.6 ? C.leaf1 : ln > 0.3 ? C.leaf2 : C.leaf3,
+              });
+            }
+          }
+        }
+      }
       trees++;
     }
   }
+
   return voxels;
 }
 
-/* ─── Mesh instanciado ─── */
+/* ═══════════════════════════════════════════════════════
+   INSTANCED MESH
+   ═══════════════════════════════════════════════════════ */
 function VoxelInstances({ voxels }: { voxels: VoxelData[] }) {
   const ref = useRef<THREE.InstancedMesh>(null!);
+
   useLayoutEffect(() => {
     const dummy = new THREE.Object3D();
-    voxels.forEach((v, i) => {
-      dummy.position.set(...v.pos);
+    for (let i = 0; i < voxels.length; i++) {
+      const v = voxels[i];
+      dummy.position.set(v.pos[0], v.pos[1], v.pos[2]);
       dummy.updateMatrix();
       ref.current.setMatrixAt(i, dummy.matrix);
       ref.current.setColorAt(i, v.color);
-    });
+    }
     ref.current.instanceMatrix.needsUpdate = true;
     if (ref.current.instanceColor) ref.current.instanceColor.needsUpdate = true;
   }, [voxels]);
 
   return (
-    <instancedMesh ref={ref} args={[undefined, undefined, voxels.length]}>
-      <boxGeometry args={[0.93, 0.93, 0.93]} />
-      <meshStandardMaterial roughness={0.85} metalness={0.05} flatShading />
+    <instancedMesh
+      ref={ref}
+      args={[undefined, undefined, voxels.length]}
+      frustumCulled={false}
+    >
+      <boxGeometry args={[1.05, 1.05, 1.05]} />
+      <meshStandardMaterial roughness={0.88} metalness={0.02} flatShading />
     </instancedMesh>
   );
 }
 
-/* ─── Partículas de clima ─── */
+/* ═══════════════════════════════════════════════════════
+   PARTÍCULAS DE CLIMA (escaladas para planeta grande)
+   ═══════════════════════════════════════════════════════ */
 function WeatherParticles({ weather }: { weather: WeatherType }) {
   const ref = useRef<THREE.Points>(null!);
-  const geo  = useMemo(() => {
-    const positions = new Float32Array(600 * 3);
-    for (let i = 0; i < 600; i++) {
-      positions[i*3]   = (Math.random() - 0.5) * 30;
-      positions[i*3+1] = Math.random() * 20 - 5;
-      positions[i*3+2] = (Math.random() - 0.5) * 30;
+  const count = 2000;
+  const spread = R * 3;
+
+  const geo = useMemo(() => {
+    const positions = new Float32Array(count * 3);
+    for (let i = 0; i < count; i++) {
+      positions[i * 3]     = (Math.random() - 0.5) * spread;
+      positions[i * 3 + 1] = Math.random() * spread - spread / 4;
+      positions[i * 3 + 2] = (Math.random() - 0.5) * spread;
     }
     const g = new THREE.BufferGeometry();
     g.setAttribute("position", new THREE.BufferAttribute(positions, 3));
     return g;
-  }, []);
+  }, [spread]);
 
   useFrame((_, delta) => {
     if (!ref.current) return;
     const pos = ref.current.geometry.attributes.position as THREE.BufferAttribute;
-    const speed = weather === "storm" ? 14 : weather === "snow" ? 3 : 8;
+    const speed = weather === "storm" ? 60 : weather === "snow" ? 12 : 30;
     for (let i = 0; i < pos.count; i++) {
       pos.setY(i, pos.getY(i) - delta * speed);
-      if (pos.getY(i) < -8) pos.setY(i, 15);
+      if (pos.getY(i) < -spread / 2) pos.setY(i, spread / 2);
     }
     pos.needsUpdate = true;
   });
@@ -151,19 +325,24 @@ function WeatherParticles({ weather }: { weather: WeatherType }) {
     <points ref={ref} geometry={geo}>
       <pointsMaterial
         color={weather === "snow" ? "#e0f2fe" : "#7dd3fc"}
-        size={weather === "snow" ? 0.18 : 0.08}
-        transparent opacity={0.7}
+        size={weather === "snow" ? 1.2 : 0.5}
+        transparent
+        opacity={0.65}
       />
     </points>
   );
 }
 
-/* ─── Névoa ─── */
+/* ═══════════════════════════════════════════════════════
+   NÉVOA
+   ═══════════════════════════════════════════════════════ */
 function FogEffect({ weather }: { weather: WeatherType }) {
   const { scene } = useThree();
   useLayoutEffect(() => {
-    if (weather === "fog" || weather === "storm") {
-      scene.fog = new THREE.Fog("#1e293b", 10, 28);
+    if (weather === "fog") {
+      scene.fog = new THREE.Fog("#334155", R * 0.8, R * 2.5);
+    } else if (weather === "storm") {
+      scene.fog = new THREE.Fog("#0f172a", R * 1, R * 3);
     } else {
       scene.fog = null;
     }
@@ -172,32 +351,51 @@ function FogEffect({ weather }: { weather: WeatherType }) {
   return null;
 }
 
-/* ─── Câmera reativa (Escalada para R=40) ─── */
-const ZOOM_POS: Record<ZoomLevel, [number, number, number]> = {
-  macro: [0, 0, 140],
-  normal: [0, 20, 100],
-  micro: [0, 5, 65],
-};
+/* ═══════════════════════════════════════════════════════
+   ILUMINAÇÃO DINÂMICA POR HORA
+   ═══════════════════════════════════════════════════════ */
+function DynamicLight({ hour, weather }: { hour: number; weather: WeatherType }) {
+  const lightRef = useRef<THREE.DirectionalLight>(null!);
 
-function CameraRig({ zoom }: { zoom: ZoomLevel }) {
-  const { camera } = useThree();
-  const target = ZOOM_POS[zoom];
-  useFrame((state, delta) => {
-    // Interpolação suave para a posição
-    camera.position.lerp(new THREE.Vector3(...target), delta * 2.5);
-    camera.lookAt(0, 0, 0);
+  useFrame(() => {
+    if (!lightRef.current) return;
+    // Sol gira ao redor do planeta conforme a hora
+    const angle = ((hour - 6) / 24) * Math.PI * 2;
+    const sunDist = R * 3;
+    lightRef.current.position.set(
+      Math.cos(angle) * sunDist,
+      Math.sin(angle) * sunDist * 0.6 + R,
+      Math.sin(angle) * sunDist * 0.4,
+    );
+
+    // Intensidade varia: forte de dia, fraca à noite
+    const dayFactor = Math.max(0, Math.sin(angle));
+    const weatherDim = weather === "fog" ? 0.4 : weather === "storm" ? 0.3 : 1;
+    lightRef.current.intensity = (0.3 + dayFactor * 1.2) * weatherDim;
   });
-  return null;
+
+  return <directionalLight ref={lightRef} color="#fef3c7" />;
 }
 
-/* ─── Planeta principal ─── */
+/* ═══════════════════════════════════════════════════════
+   CÂMERA
+   ═══════════════════════════════════════════════════════ */
+const ZOOM_DIST: Record<ZoomLevel, number> = {
+  macro: R * 4,
+  normal: R * 2.5,
+  micro: R * 1.6,
+};
+
+/* ═══════════════════════════════════════════════════════
+   PLANETA (GRUPO QUE ROTACIONA)
+   ═══════════════════════════════════════════════════════ */
 function PlanetGroup({ weather }: { weather: WeatherType }) {
   const ref = useRef<THREE.Group>(null!);
-  // Adicionamos weather no useMemo para o planeta mudar se o clima mudar
   const voxels = useMemo(() => generatePlanet(weather), [weather]);
 
   useFrame((_, delta) => {
-    ref.current.rotation.y += delta * (weather === "storm" ? 0.25 : 0.08);
+    const speed = weather === "storm" ? 0.15 : 0.04;
+    ref.current.rotation.y += delta * speed;
   });
 
   return (
@@ -207,47 +405,59 @@ function PlanetGroup({ weather }: { weather: WeatherType }) {
   );
 }
 
-/* ─── Cor de fundo refinada (Céu Dinâmico) ─── */
-function skyColor(hour: number): string {
-  // Madrugada
-  if (hour >= 0 && hour < 5) return "#02040a";
-  // Amanhecer
-  if (hour >= 5 && hour < 8) return "#1e1b4b";
-  // Dia
-  if (hour >= 8 && hour < 17) return "#05070f";
-  // Entardecer
-  if (hour >= 17 && hour < 20) return "#1e1a2b";
-  // Noite
-  return "#020408";
+/* ═══════════════════════════════════════════════════════
+   CÉU DINÂMICO
+   ═══════════════════════════════════════════════════════ */
+function skyColor(hour: number, weather: WeatherType): string {
+  if (weather === "storm") return "#0a0a0f";
+  if (weather === "fog") return "#1e293b";
+
+  if (hour >= 0 && hour < 5) return "#020408";   // Madrugada
+  if (hour >= 5 && hour < 7) return "#1e1b4b";   // Amanhecer
+  if (hour >= 7 && hour < 10) return "#0c1445";   // Manhã
+  if (hour >= 10 && hour < 16) return "#070e2b";  // Dia
+  if (hour >= 16 && hour < 18) return "#1a1040";  // Entardecer
+  if (hour >= 18 && hour < 20) return "#12082a";  // Crepúsculo
+  return "#020408";                                 // Noite
 }
 
-/* ─── Canvas completo ─── */
+/* ═══════════════════════════════════════════════════════
+   CANVAS PRINCIPAL
+   ═══════════════════════════════════════════════════════ */
 export default function VoxelPlanet() {
   const { weather, zoom, hour } = useGameState();
 
   return (
     <div className="absolute inset-0">
-      <Canvas camera={{ position: ZOOM_POS["normal"], fov: 45 }} dpr={[1, 1.5]}>
-        <color attach="background" args={[skyColor(hour)]} />
+      <Canvas
+        camera={{ position: [0, R * 0.5, ZOOM_DIST["normal"]], fov: 50 }}
+        dpr={[1, 1.5]}
+        gl={{ antialias: true }}
+      >
+        <color attach="background" args={[skyColor(hour, weather)]} />
         <FogEffect weather={weather} />
-        <CameraRig zoom={zoom} />
-        <ambientLight intensity={weather === "storm" ? 0.35 : 0.65} />
-        <hemisphereLight args={["#bfdbfe", "#1e293b", 0.5]} />
-        <directionalLight
-          position={[20, 40, 20]}
-          intensity={weather === "fog" ? 0.5 : 1.3}
-        />
+        <ambientLight intensity={weather === "storm" ? 0.2 : weather === "fog" ? 0.4 : 0.55} />
+        <hemisphereLight args={["#bfdbfe", "#1e293b", 0.35]} />
+        <DynamicLight hour={hour} weather={weather} />
         <PlanetGroup weather={weather} />
         <WeatherParticles weather={weather} />
-        <Stars radius={150} depth={50} count={5000} factor={6} fade speed={0.4} />
+        <Stars radius={R * 6} depth={R * 3} count={6000} factor={8} fade speed={0.3} />
         {weather === "sunny" && (
-          <Sparkles count={100} scale={[60, 40, 60]} size={2} speed={0.4} color="#fde68a" />
+          <Sparkles
+            count={60}
+            scale={[R * 4, R * 2, R * 4]}
+            size={3}
+            speed={0.3}
+            color="#fde68a"
+          />
         )}
-        <OrbitControls 
-          enablePan={false} 
-          minDistance={50} 
-          maxDistance={200}
-          autoRotate={false}
+        <OrbitControls
+          enablePan={false}
+          minDistance={R * 1.4}
+          maxDistance={R * 5}
+          target={[0, 0, 0]}
+          enableDamping
+          dampingFactor={0.05}
         />
       </Canvas>
     </div>

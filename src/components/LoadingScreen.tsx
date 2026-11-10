@@ -24,7 +24,8 @@ export default function LoadingScreen() {
     const interval = setInterval(() => {
       setProgress((p) => {
         if (p >= 100) { clearInterval(interval); setReady(true); return 100; }
-        return p + 2;
+        // Progresso mais lento para planeta maior
+        return p + 0.8;
       });
     }, 40);
     return () => clearInterval(interval);
