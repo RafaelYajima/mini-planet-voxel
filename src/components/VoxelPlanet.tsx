@@ -15,7 +15,8 @@ const C = {
   grass3: new THREE.Color("#16a34a"), grass4: new THREE.Color("#15803d"),
   dirt1: new THREE.Color("#92400e"), dirt2: new THREE.Color("#a16207"),
   stone1: new THREE.Color("#6b7280"), stone2: new THREE.Color("#4b5563"),
-  stone3: new THREE.Color("#374151"), stoneDeep: new THREE.Color("#1f2937"),
+  stone3: new THREE.Color("#374151"), stoneDeep: new THREE.Color("#334155"),
+  craterFloor: new THREE.Color("#475569"),
   snow1: new THREE.Color("#e0f2fe"), snow2: new THREE.Color("#f8fafc"),
   mud: new THREE.Color("#5c2d0a"),
   trunk: new THREE.Color("#5b3418"), trunkDark: new THREE.Color("#3e200c"),
@@ -71,10 +72,27 @@ function terrainHeight(nx: number, ny: number, nz: number): number {
   const dir: [number,number,number] = [nx,ny,nz];
   const base = (fbm(nx*1.6,ny*1.6,nz*1.6)-0.5)*5 + (fbm(nx*4+10,ny*4,nz*4)-0.5)*2;
   const peaks = infl(dir,PEAK_1,0.95)*20 + infl(dir,PEAK_2,0.95)*16 + infl(dir,PEAK_3,0.955)*22;
-  const holeFactor = infl(dir,HOLE_DIR,0.90);
-  const holeDeep = infl(dir,HOLE_DIR,0.94);
-  const bigHole = -holeDeep*20 + (holeFactor-holeDeep)*6;
-  return base + peaks + bigHole;
+
+  // Cratera grande estilo bacia com fundo plano caminhável
+  const d = dot3(dir, HOLE_DIR);
+  let crater = 0;
+  if (d > 0.965) {
+    crater = -12; // fundo plano
+  } else if (d > 0.90) {
+    const t = (d - 0.90) / (0.965 - 0.90);
+    crater = -12 * (t * t * (3 - 2 * t)); // descida suave até o fundo
+  }
+
+  // Borda elevada da cratera
+  let rim = 0;
+  if (d > 0.84 && d < 0.92) {
+    const center = 0.88;
+    const width = 0.04;
+    const t = 1 - Math.min(1, Math.abs(d - center) / width);
+    rim = t * 4.5;
+  }
+
+  return base + peaks + crater + rim;
 }
 
 /* ═══════ COR ═══════ */
@@ -83,9 +101,10 @@ function terrainColor(h: number, n: number, w: WeatherType): THREE.Color {
   if(h>12) return n>0.45?C.snow1:C.snow2;
   if(h>7) return n>0.55?C.stone1:C.stone2;
   if(h>4.5) return n>0.6?C.stone1:C.grass4;
-  if(h<-10) return n>0.5?C.stoneDeep:C.stone3;
-  if(h<-4) return n>0.5?C.stone2:C.stone3;
-  if(h<-1.5) return n>0.5?C.dirt1:C.stone2;
+  // Fundo da cratera: chão visível, não preto
+  if(h<=-11) return n>0.5?C.craterFloor:C.stone2;
+  if(h<-6) return n>0.5?C.stoneDeep:C.stone3;
+  if(h<-2.5) return n>0.5?C.stone2:C.dirt1;
   if(w==="rain"&&h<1.5) return n>0.5?C.mud:C.dirt1;
   if(n>0.87) return C.dirt2;
   if(n>0.62) return C.grass1;
@@ -106,67 +125,85 @@ function addColossalTree(data: VD[], occ: Set<string>) {
   const h = terrainHeight(nx,ny,nz);
   const bx=nx*(R+h), by=ny*(R+h), bz=nz*(R+h);
 
-  // Tronco: 30 blocos alto, raio base 4, afina para 2 no topo
-  const trunkH = 30;
+  // Tronco: ainda maior e mais grosso
+  const trunkH = 34;
   for (let t=0; t<=trunkH; t++) {
     const cx=bx+nx*t, cy=by+ny*t, cz=bz+nz*t;
     const progress = t/trunkH;
-    const trunkR = Math.round(4 - progress*2); // 4 -> 2
+    const trunkR = Math.max(2, Math.round(5 - progress*2)); // 5 -> 2
     for(let dx=-trunkR;dx<=trunkR;dx++)
     for(let dy=-trunkR;dy<=trunkR;dy++)
     for(let dz=-trunkR;dz<=trunkR;dz++) {
-      if(dx*dx+dy*dy+dz*dz<=trunkR*trunkR) {
+      if(dx*dx+dy*dy+dz*dz<=trunkR*trunkR+1) {
         const n=hash(dx+t*7,dy+t*3,dz+t*11);
         addV(Math.round(cx+dx),Math.round(cy+dy),Math.round(cz+dz),
-          n>0.7?C.bark:n>0.3?C.trunk:C.trunkDark,data,occ);
+          n>0.72?C.bark:n>0.38?C.trunk:C.trunkDark,data,occ);
       }
     }
   }
 
-  // Raízes massivas (6 raízes que se espalham)
-  for(let r=0;r<6;r++) {
-    const angle = (r/6)*Math.PI*2;
-    for(let seg=0;seg<12;seg++) {
-      const spread = seg*2;
-      const dropOff = seg*0.6;
+  // Raízes massivas
+  for(let r=0;r<8;r++) {
+    const angle = (r/8)*Math.PI*2;
+    for(let seg=0;seg<14;seg++) {
+      const spread = seg*2.1;
+      const dropOff = seg*0.7;
       const rx=Math.round(bx+Math.cos(angle)*spread-nx*dropOff);
-      const ry=Math.round(by+Math.sin(angle)*spread*0.3-ny*dropOff);
+      const ry=Math.round(by+Math.sin(angle)*spread*0.25-ny*dropOff);
       const rz=Math.round(bz+Math.sin(angle)*spread-nz*dropOff);
-      // Raiz grossa
       for(let dx=-1;dx<=1;dx++)
       for(let dz=-1;dz<=1;dz++) {
         addV(rx+dx,ry,rz+dz,C.trunkDark,data,occ);
-        if(seg<6) addV(rx+dx,ry+1,rz+dz,C.trunk,data,occ);
+        if(seg<7) addV(rx+dx,ry+1,rz+dz,C.trunk,data,occ);
       }
     }
   }
 
-  // Galhos grossos saindo do meio do tronco (4 galhos)
-  for(let br=0;br<4;br++) {
-    const angle=(br/4)*Math.PI*2+0.3;
-    const brStart = 16+br*2;
-    const bcx=bx+nx*brStart, bcy=by+ny*brStart, bcz=bz+nz*brStart;
-    for(let seg=0;seg<10;seg++) {
-      const gx=Math.round(bcx+Math.cos(angle)*seg*1.5+nx*seg*0.5);
-      const gy=Math.round(bcy+Math.sin(angle)*seg*0.8+ny*seg*0.5);
-      const gz=Math.round(bcz+Math.sin(angle)*seg*1.5+nz*seg*0.5);
-      addV(gx,gy,gz,C.trunk,data,occ);
-      addV(gx+1,gy,gz,C.trunk,data,occ);
-      addV(gx,gy,gz+1,C.trunk,data,occ);
+  // Muitos galhos longos, com copas separadas nas pontas
+  const branches: {angle:number; start:number; rise:number; len:number; tipR:number}[] = [
+    { angle: 0.1, start: 14, rise: 0.8, len: 12, tipR: 5 },
+    { angle: 0.9, start: 17, rise: 1.0, len: 14, tipR: 6 },
+    { angle: 1.7, start: 15, rise: 0.9, len: 13, tipR: 5 },
+    { angle: 2.6, start: 18, rise: 1.1, len: 15, tipR: 6 },
+    { angle: 3.5, start: 13, rise: 0.7, len: 11, tipR: 5 },
+    { angle: 4.2, start: 19, rise: 1.2, len: 16, tipR: 6 },
+    { angle: 5.1, start: 16, rise: 0.9, len: 13, tipR: 5 },
+    { angle: 5.9, start: 20, rise: 1.3, len: 17, tipR: 6 },
+  ];
+
+  const crowns: {cx:number;cy:number;cz:number;r:number}[] = [];
+
+  for(const br of branches) {
+    const startX=bx+nx*br.start, startY=by+ny*br.start, startZ=bz+nz*br.start;
+    let tipX=startX, tipY=startY, tipZ=startZ;
+
+    for(let seg=0;seg<br.len;seg++) {
+      const gx=Math.round(startX+Math.cos(br.angle)*seg*1.6+nx*seg*0.5);
+      const gy=Math.round(startY+Math.sin(br.angle)*seg*0.35+ny*seg*br.rise);
+      const gz=Math.round(startZ+Math.sin(br.angle)*seg*1.6+nz*seg*0.5);
+      tipX=gx; tipY=gy; tipZ=gz;
+
+      // Galho grosso na base, afinando na ponta
+      const branchR = seg < 4 ? 2 : seg < 8 ? 1 : 0;
+      for(let dx=-branchR;dx<=branchR;dx++)
+      for(let dy=-branchR;dy<=branchR;dy++)
+      for(let dz=-branchR;dz<=branchR;dz++) {
+        if(dx*dx+dy*dy+dz*dz<=branchR*branchR+1) {
+          addV(gx+dx,gy+dy,gz+dz,seg>br.len*0.7?C.trunk:C.bark,data,occ);
+        }
+      }
     }
+
+    // Guarda copa da ponta do galho
+    crowns.push({ cx: tipX, cy: tipY, cz: tipZ, r: br.tipR });
   }
 
-  // Copa colossal — cluster de 7 esferas formando uma copa enorme
-  const topX=bx+nx*(trunkH+5), topY=by+ny*(trunkH+5), topZ=bz+nz*(trunkH+5);
-  const crowns: {cx:number;cy:number;cz:number;r:number}[] = [
-    {cx:topX, cy:topY, cz:topZ, r:12},
-    {cx:topX+nx*8, cy:topY+ny*8, cz:topZ+nz*8, r:8},
-    {cx:topX-nx*3+8, cy:topY-ny*3+4, cz:topZ-nz*3+6, r:9},
-    {cx:topX+6, cy:topY+3, cz:topZ-8, r:8},
-    {cx:topX-7, cy:topY+4, cz:topZ+7, r:8},
-    {cx:topX-5, cy:topY-3, cz:topZ-5, r:7},
-    {cx:topX+8, cy:topY-2, cz:topZ+5, r:7},
-  ];
+  // Copa central superior + copas nas pontas dos galhos (mais espaçadas)
+  const topX=bx+nx*(trunkH+7), topY=by+ny*(trunkH+7), topZ=bz+nz*(trunkH+7);
+  crowns.unshift(
+    {cx:topX, cy:topY, cz:topZ, r:10},
+    {cx:topX+nx*8, cy:topY+ny*8, cz:topZ+nz*8, r:7},
+  );
 
   for(const crown of crowns) {
     const cr=crown.r;
@@ -174,10 +211,10 @@ function addColossalTree(data: VD[], occ: Set<string>) {
     for(let dy=-cr;dy<=cr;dy++)
     for(let dz=-cr;dz<=cr;dz++) {
       const dd=dx*dx+dy*dy+dz*dz;
-      if(dd<=cr*cr && hash(dx+cr*7,dy+cr*3,dz+cr*11)>0.12) {
+      if(dd<=cr*cr && hash(dx+cr*7,dy+cr*3,dz+cr*11)>0.18) {
         const ln=hash(dx*3+1,dy*3+2,dz*3+3);
         addV(Math.round(crown.cx+dx),Math.round(crown.cy+dy),Math.round(crown.cz+dz),
-          ln>0.65?C.leafBright:ln>0.45?C.leaf1:ln>0.25?C.leaf2:C.leaf3,
+          ln>0.68?C.leafBright:ln>0.48?C.leaf1:ln>0.28?C.leaf2:C.leaf3,
           data,occ);
       }
     }

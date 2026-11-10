@@ -26,7 +26,7 @@ export default function WeatherPanel() {
 
   return (
     <div
-      className="slide-in-right absolute right-4 top-16 z-30 w-72 rounded-2xl border border-white/10 bg-[#0a0c14]/95 backdrop-blur-xl p-5 shadow-2xl"
+      className="pointer-events-auto slide-in-right absolute right-4 top-16 z-30 w-72 rounded-2xl border border-white/10 bg-[#0a0c14]/95 backdrop-blur-xl p-5 shadow-2xl"
       onPointerDown={(e) => e.stopPropagation()}
       onMouseDown={(e) => e.stopPropagation()}
       onTouchStart={(e) => e.stopPropagation()}

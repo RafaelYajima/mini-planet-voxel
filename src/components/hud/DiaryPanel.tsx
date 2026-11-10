@@ -37,7 +37,7 @@ export default function DiaryPanel() {
 
   return (
     <div
-      className="slide-in-right absolute right-4 top-16 z-30 w-72 rounded-2xl border border-white/10 bg-slate-950/90 backdrop-blur-md shadow-2xl overflow-hidden"
+      className="pointer-events-auto slide-in-right absolute right-4 top-16 z-30 w-72 rounded-2xl border border-white/10 bg-slate-950/90 backdrop-blur-md shadow-2xl overflow-hidden"
       onPointerDown={(e) => e.stopPropagation()}
       onMouseDown={(e) => e.stopPropagation()}
       onTouchStart={(e) => e.stopPropagation()}
