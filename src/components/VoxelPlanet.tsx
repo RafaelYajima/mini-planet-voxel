@@ -1,8 +1,8 @@
 "use client";
 
-import { useLayoutEffect, useMemo, useRef } from "react";
+import { useLayoutEffect, useMemo, useRef, useEffect, useState } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
-import { OrbitControls, Stars } from "@react-three/drei";
+import { OrbitControls, Stars, Sparkles } from "@react-three/drei";
 import * as THREE from "three";
 import { useGameState } from "@/context/GameContext";
 import type { WeatherType } from "@/store/gameStore";
@@ -25,7 +25,7 @@ const C = {
   leaf3: new THREE.Color("#14532d"), leafBright: new THREE.Color("#22c55e"),
 };
 
-/* ═══════ MATH ═══════ */
+/* ═══════ MATH & NOISE ═══════ */
 function norm(v: [number,number,number]): [number,number,number] {
   const d=Math.sqrt(v[0]*v[0]+v[1]*v[1]+v[2]*v[2]); return [v[0]/d,v[1]/d,v[2]/d];
 }
@@ -46,230 +46,210 @@ function noise3d(x:number,y:number,z:number): number {
   const x0=a+(b-a)*sx,x1=e+(f-e)*sx,x2=c+(d-c)*sx,x3=g+(h2-g)*sx;
   return (x0+(x2-x0)*sy)+((x1+(x3-x1)*sy)-(x0+(x2-x0)*sy))*sz;
 }
-function fbm(x:number,y:number,z:number): number {
-  return noise3d(x,y,z)*0.5+noise3d(x*2.1,y*2.1,z*2.1)*0.25+noise3d(x*4.3,y*4.3,z*4.3)*0.15;
+function fbm(x:number,y:number,z:number, oct=3): number {
+  let v=0, a=0.5, f=1;
+  for(let i=0; i<oct; i++) { v += noise3d(x*f, y*f, z*f)*a; a*=0.5; f*=2.1; }
+  return v;
 }
 
 /* ═══════ LANDMARKS ═══════ */
 const HOLE_DIR = norm([-0.78, 0.08, -0.62]);
 const TREE_DIR = norm([0.48, 0.12, 0.86]);
+const LAKE_DIR = norm([0.2, -0.6, -0.4]);
 const CAVE_DIR = norm([-0.72, -0.10, -0.68]);
 
 /* ═══════ TERRENO ═══════ */
 function terrainHeight(nx:number, ny:number, nz:number): number {
   const dir:[number,number,number]=[nx,ny,nz];
-  const base=(fbm(nx*1.8,ny*1.8,nz*1.8)-0.5)*6;
+  // Montanhas pequenas e médias (Ambientação)
+  const hills = (fbm(nx*2.5, ny*2.5, nz*2.5, 4)-0.3)*8;
+  const smallPeaks = Math.pow(Math.max(0, fbm(nx*5, ny*5, nz*5, 2)-0.4), 2)*15;
+  
   // Cratera
   const dH=dot3(dir,HOLE_DIR);
   let crater=0;
-  if(dH>0.96) crater=-16;
-  else if(dH>0.88) { const t=(dH-0.88)/(0.96-0.88); crater=-16*(t*t*(3-2*t)); }
-  // Borda
-  let rim=0;
-  if(dH>0.82&&dH<0.90) { const t=1-Math.min(1,Math.abs(dH-0.86)/0.04); rim=t*5; }
-  return base+crater+rim;
+  if(dH>0.96) crater=-14;
+  else if(dH>0.88) { const t=(dH-0.88)/(0.96-0.88); crater=-14*(t*t*(3-2*t)); }
+  
+  // Lago
+  const dL=dot3(dir,LAKE_DIR);
+  let lake=0;
+  if(dL>0.94) lake=-6;
+  else if(dL>0.86) { const t=(dL-0.86)/(0.94-0.86); lake=-6*(t*t*(3-2*t)); }
+
+  return hills + smallPeaks + crater + lake;
 }
 
-function isCave(x:number,y:number,z:number): boolean {
-  // Túnel cilíndrico que entra na parede da cratera
-  const startDist=R-8, endDist=R-22;
-  const sx=CAVE_DIR[0]*startDist, sy=CAVE_DIR[1]*startDist, sz=CAVE_DIR[2]*startDist;
-  const ex=CAVE_DIR[0]*endDist, ey=CAVE_DIR[1]*endDist, ez=CAVE_DIR[2]*endDist;
-  const dx=x-sx,dy=y-sy,dz=z-sz;
-  const lx=ex-sx,ly=ey-sy,lz=ez-sz;
-  const lenSq=lx*lx+ly*ly+lz*lz;
-  const t=Math.max(0,Math.min(1,(dx*lx+dy*ly+dz*lz)/lenSq));
-  const px=sx+t*lx,py=sy+t*ly,pz=sz+t*lz;
-  return Math.sqrt((x-px)**2+(y-py)**2+(z-pz)**2) < 4;
+function getVoxelData(x:number, y:number, z:number, weather: WeatherType, progress: number): THREE.Color | null {
+  const dist=Math.sqrt(x*x+y*y+z*z);
+  const nx=x/dist, ny=y/dist, nz=z/dist;
+  
+  // Subtração da Caverna
+  const startD=R-6, endD=R-20;
+  const sx=CAVE_DIR[0]*startD, sy=CAVE_DIR[1]*startD, sz=CAVE_DIR[2]*startD;
+  const ex=CAVE_DIR[0]*endD, ey=CAVE_DIR[1]*endD, ez=CAVE_DIR[2]*endD;
+  const dx=x-sx, dy=y-sy, dz=z-sz;
+  const lx=ex-sx, ly=ey-sy, lz=ez-sz;
+  const tCave=Math.max(0,Math.min(1,(dx*lx+dy*ly+dz*lz)/(lx*lx+ly*ly+lz*lz)));
+  const distToCave = Math.sqrt((x-(sx+tCave*lx))**2+(y-(sy+tCave*ly))**2+(z-(sz+tCave*lz))**2);
+  if(distToCave < 3.8) return null;
+
+  const h = terrainHeight(nx,ny,nz);
+  const surfDist = R + h;
+  if(dist > surfDist + 0.3) return null;
+  if(dist < surfDist - 2.5) return null; // Apenas casca grossa
+
+  const n = hash(x,y,z);
+  const clusterNoise = noise3d(x*0.15, y*0.15, z*0.15); // Ruído para manchas (clusters)
+  
+  // Lógica de Transição por Manchas
+  // Se clusterNoise < progress, o bloco já "pegou" o novo clima
+  const effectiveWeather = clusterNoise < progress ? weather : "sunny";
+
+  // Determinação da Cor baseada no Clima Efetivo
+  if(effectiveWeather === "snow" || effectiveWeather === "storm") {
+    if(h > -2) return n > 0.4 ? C.snow1 : C.snow2;
+  }
+  
+  // Água do Lago
+  const dL = dot3([nx,ny,nz], LAKE_DIR);
+  if(dL > 0.93 && dist < R - 2) return C.water;
+
+  if(h > 12) return n > 0.5 ? C.snow1 : C.snow2; // Picos nevados permanentes
+  if(h > 6) return n > 0.5 ? C.stone1 : C.stone2;
+  if(h < -12) return C.craterFloor;
+  
+  if(effectiveWeather === "rain" && h < 1) {
+    const pNoise = hash(Math.round(x*0.2), 0, Math.round(z*0.2));
+    if(pNoise > 0.8) return C.water;
+    if(pNoise > 0.6) return C.mud;
+  }
+
+  if(n > 0.8) return C.dirt1;
+  return n > 0.6 ? C.grass1 : n > 0.3 ? C.grass2 : C.grass3;
 }
 
-/* ═══════ COR POR CLIMA ═══════ */
-function colorForWeather(x:number,y:number,z:number,h:number,n:number,w:WeatherType): THREE.Color {
-  const pN=hash(Math.round(x*0.3),Math.round(y*0.3),Math.round(z*0.3));
+type Voxel = { pos:[number,number,number]; colorSunny:THREE.Color; colorWeather:THREE.Color; cluster:number };
 
-  if(w==="snow"||w==="storm") { if(h>-10) return n>0.4?C.snow1:C.snow2; }
-
-  if((w==="rain"||w==="storm")&&h<2&&h>-5) {
-    if(pN>0.85) return C.water; // poça
-    if(pN>0.7) return C.mud;    // lama ao redor
-  }
-
-  if(h>12) return n>0.4?C.snow1:C.snow2;
-  if(h>7) return n>0.5?C.stone1:C.stone2;
-  if(h<=-14) return n>0.5?C.craterFloor:C.stone2;
-  if(h<-6) return n>0.5?C.stoneDeep:C.stone3;
-  if(h<-2) return n>0.5?C.stone2:C.dirt1;
-
-  if(n>0.85) return C.dirt2;
-  if(n>0.6) return C.grass1;
-  if(n>0.35) return C.grass2;
-  if(n>0.15) return C.grass3;
-  return C.grass4;
-}
-
-/* ═══════ TIPOS ═══════ */
-type VD = { pos:[number,number,number]; h:number; n:number; isInternal:boolean };
-
-/* ═══════ GERAÇÃO (uma vez só) ═══════ */
-function generatePlanet(): VD[] {
-  const data: VD[]=[];
-  const solidSet=new Set<string>();
-  const maxR=R+10, minR=R-20;
-
-  // Passo 1: sólidos
-  for(let x=-maxR;x<=maxR;x++)
-  for(let y=-maxR;y<=maxR;y++)
-  for(let z=-maxR;z<=maxR;z++) {
-    const dSq=x*x+y*y+z*z;
-    if(dSq<minR*minR||dSq>maxR*maxR) continue;
-    if(isCave(x,y,z)) continue;
-    const dist=Math.sqrt(dSq);
-    const nx=x/dist,ny=y/dist,nz=z/dist;
-    if(dist<=R+terrainHeight(nx,ny,nz)) solidSet.add(`${x},${y},${z}`);
-  }
-
-  // Passo 2: expostos
-  const dirs=[[1,0,0],[-1,0,0],[0,1,0],[0,-1,0],[0,0,1],[0,0,-1]];
-  for(const k of solidSet) {
-    const [x,y,z]=k.split(",").map(Number);
-    let exp=false;
-    for(const [dx,dy,dz] of dirs) if(!solidSet.has(`${x+dx},${y+dy},${z+dz}`)){exp=true;break;}
-    if(!exp) continue;
-    const dist=Math.sqrt(x*x+y*y+z*z);
-    const nx=x/dist,ny=y/dist,nz=z/dist;
-    const h=terrainHeight(nx,ny,nz);
-    const depth=R+h-dist;
-    data.push({pos:[x,y,z],h,n:hash(x,y,z),isInternal:depth>1.2});
-  }
-
-  // Passo 3: árvore colossal
-  const [tx,ty,tz]=TREE_DIR;
-  const th=terrainHeight(tx,ty,tz);
-  const bx=tx*(R+th),by=ty*(R+th),bz=tz*(R+th);
-  const tH=34;
+/* ═══════ GERAÇÃO ═══════ */
+function generatePlanet(weather: WeatherType): Voxel[] {
+  const data: Voxel[]=[];
   const occ=new Set<string>();
+  const maxR = R + 22, minR = R - 22;
 
-  // Tronco
-  for(let i=0;i<=tH;i++) {
-    const cx=bx+tx*i,cy=by+ty*i,cz=bz+tz*i;
-    const r=Math.max(2,Math.round(5-i*3/tH));
-    for(let dx=-r;dx<=r;dx++)for(let dy=-r;dy<=r;dy++)for(let dz=-r;dz<=r;dz++) {
-      if(dx*dx+dy*dy+dz*dz<=r*r+1) {
-        const px=Math.round(cx+dx),py=Math.round(cy+dy),pz=Math.round(cz+dz);
-        const k=`${px},${py},${pz}`;
-        if(!occ.has(k)){occ.add(k);data.push({pos:[px,py,pz],h:99,n:hash(px,py,pz),isInternal:false});}
-      }
+  for(let x=-maxR; x<=maxR; x++)
+  for(let y=-maxR; y<=maxR; y++)
+  for(let z=-maxR; z<=maxR; z++) {
+    const dSq = x*x+y*y+z*z;
+    if(dSq < minR*minR || dSq > maxR*maxR) continue;
+    
+    const color = getVoxelData(x,y,z, "sunny", 0);
+    if(color) {
+      const cluster = noise3d(x*0.15, y*0.15, z*0.15);
+      const wColor = getVoxelData(x,y,z, weather, 1.1) || color;
+      data.push({ pos:[x,y,z], colorSunny:color, colorWeather:wColor, cluster });
+      occ.add(`${x},${y},${z}`);
     }
   }
 
-  // Galhos com copas nas pontas
-  for(let br=0;br<6;br++) {
-    const ang=(br/6)*Math.PI*2+br*0.4;
-    const start=14+br*3;
-    const scx=bx+tx*start,scy=by+ty*start,scz=bz+tz*start;
-    let tipX=scx,tipY=scy,tipZ=scz;
-    for(let j=0;j<16;j++) {
-      const gx=Math.round(scx+Math.cos(ang)*j*1.8+tx*j*0.4);
-      const gy=Math.round(scy+Math.sin(ang)*j*0.4+ty*j*0.7);
-      const gz=Math.round(scz+Math.sin(ang)*j*1.8+tz*j*0.4);
-      tipX=gx;tipY=gy;tipZ=gz;
-      const br2=j<5?2:j<10?1:0;
-      for(let dx=-br2;dx<=br2;dx++)for(let dy=-br2;dy<=br2;dy++)for(let dz=-br2;dz<=br2;dz++){
-        if(dx*dx+dy*dy+dz*dz<=br2*br2+1){
-          const k=`${gx+dx},${gy+dy},${gz+dz}`;
-          if(!occ.has(k)){occ.add(k);data.push({pos:[gx+dx,gy+dy,gz+dz],h:98,n:0.5,isInternal:false});}
+  // Árvores Regulares (Pequenas)
+  let smallTrees = 0;
+  for(let i=0; i<data.length && smallTrees < 150; i += 40) {
+    const v = data[i];
+    if(v.colorSunny !== C.grass1 && v.colorSunny !== C.grass2) continue;
+    const [px,py,pz] = v.pos;
+    if(hash(px,py,pz) < 0.97) continue;
+    const dist = Math.sqrt(px*px+py*py+pz*pz);
+    const ux=px/dist, uy=py/dist, uz=pz/dist;
+    const h = 2 + Math.floor(hash(px,py,pz)*2);
+    for(let t=1; t<=h; t++) {
+      const tx=Math.round(px+ux*t), ty=Math.round(py+uy*t), tz=Math.round(pz+uz*t);
+      data.push({ pos:[tx,ty,tz], colorSunny:C.trunk, colorWeather:C.trunk, cluster:-1 });
+    }
+    const cx=px+ux*(h+1), cy=py+uy*(h+1), cz=pz+uz*(h+1);
+    for(let dx=-2; dx<=2; dx++) for(let dy=-2; dy<=2; dy++) for(let dz=-2; dz<=2; dz++) {
+      if(dx*dx+dy*dy+dz*dz < 5) {
+        data.push({ pos:[Math.round(cx+dx),Math.round(cy+dy),Math.round(cz+dz)], colorSunny:C.leaf2, colorWeather:C.leaf2, cluster:-1 });
+      }
+    }
+    smallTrees++;
+  }
+
+  // Árvore Colossal (Ainda Maior)
+  const [tx,ty,tz]=TREE_DIR;
+  const hT=terrainHeight(tx,ty,tz);
+  const bx=tx*(R+hT), by=ty*(R+hT), bz=tz*(R+hT);
+  const trunkH = 45;
+  for(let i=0; i<trunkH; i++) {
+    const cx=bx+tx*i, cy=by+ty*i, cz=bz+tz*i;
+    const r=Math.max(2, Math.round(6*(1-i/trunkH)+1));
+    for(let dx=-r; dx<=r; dx++) for(let dy=-r; dy<=r; dy++) for(let dz=-r; dz<=r; dz++) {
+      if(dx*dx+dy*dy+dz*dz <= r*r) {
+        data.push({ pos:[Math.round(cx+dx),Math.round(cy+dy),Math.round(cz+dz)], colorSunny:C.trunk, colorWeather:C.trunk, cluster:-1 });
+      }
+    }
+    // Galhos Colossais
+    if(i > 20 && i % 10 === 0) {
+      const ang = i * 1.5;
+      for(let j=0; j<22; j++) {
+        const gx=Math.round(cx+Math.cos(ang)*j*2), gy=Math.round(cy+j*0.8), gz=Math.round(cz+Math.sin(ang)*j*2);
+        data.push({ pos:[gx,gy,gz], colorSunny:C.trunk, colorWeather:C.trunk, cluster:-1 });
+        if(j > 18) {
+          for(let lx=-7; lx<=7; lx++) for(let ly=-7; ly<=7; ly++) for(let lz=-7; lz<=7; lz++)
+            if(lx*lx+ly*ly+lz*lz < 45) data.push({ pos:[gx+lx,gy+ly,gz+lz], colorSunny:C.leaf1, colorWeather:C.leaf1, cluster:-1 });
         }
       }
-    }
-    // Copa na ponta
-    const cr=5+Math.floor(hash(br,0,0)*3);
-    for(let dx=-cr;dx<=cr;dx++)for(let dy=-cr;dy<=cr;dy++)for(let dz=-cr;dz<=cr;dz++){
-      if(dx*dx+dy*dy+dz*dz<=cr*cr&&hash(dx+br*7,dy,dz)>0.15){
-        const k=`${Math.round(tipX+dx)},${Math.round(tipY+dy)},${Math.round(tipZ+dz)}`;
-        if(!occ.has(k)){occ.add(k);data.push({pos:[Math.round(tipX+dx),Math.round(tipY+dy),Math.round(tipZ+dz)],h:100,n:hash(dx,dy,dz),isInternal:false});}
-      }
-    }
-  }
-
-  // Copa central do topo
-  const topX=bx+tx*(tH+6),topY=by+ty*(tH+6),topZ=bz+tz*(tH+6);
-  for(let dx=-10;dx<=10;dx++)for(let dy=-10;dy<=10;dy++)for(let dz=-10;dz<=10;dz++){
-    if(dx*dx+dy*dy+dz*dz<=90&&hash(dx+99,dy+33,dz+77)>0.14){
-      const k=`${Math.round(topX+dx)},${Math.round(topY+dy)},${Math.round(topZ+dz)}`;
-      if(!occ.has(k)){occ.add(k);data.push({pos:[Math.round(topX+dx),Math.round(topY+dy),Math.round(topZ+dz)],h:100,n:hash(dx,dy,dz),isInternal:false});}
     }
   }
 
   return data;
 }
 
-/* ═══════ COR PARA UM VOXEL ═══════ */
-function voxelColor(v: VD, weather: WeatherType): THREE.Color {
-  // Árvore
-  if(v.h>=98) {
-    if(v.h===100) { const ln=v.n; return ln>0.6?C.leafBright:ln>0.4?C.leaf1:ln>0.2?C.leaf2:C.leaf3; }
-    return v.n>0.7?C.bark:v.n>0.3?C.trunk:C.trunkDark;
-  }
-  if(v.isInternal) return v.n>0.5?C.stone2:C.stone3;
-  return colorForWeather(v.pos[0],v.pos[1],v.pos[2],v.h,v.n,weather);
-}
-
 /* ═══════ COMPONENTE PLANETA ═══════ */
 function PlanetBody() {
   const { weather } = useGameState();
   const meshRef = useRef<THREE.InstancedMesh>(null!);
-  const voxels = useMemo(() => generatePlanet(), []);
-  const lastWeather = useRef<WeatherType>("sunny");
-  const transitionIndex = useRef(voxels.length); // começa "terminado"
-  const shuffledOrder = useRef<number[]>([]);
+  const voxels = useMemo(() => generatePlanet(weather), [weather]);
+  const transitionStart = useRef(Date.now());
+  const prevWeather = useRef<WeatherType>("sunny");
 
-  // Setup posições (uma vez)
-  useLayoutEffect(() => {
-    const dummy = new THREE.Object3D();
-    for(let i=0;i<voxels.length;i++) {
-      dummy.position.set(...voxels[i].pos);
-      dummy.updateMatrix();
-      meshRef.current.setMatrixAt(i, dummy.matrix);
-      meshRef.current.setColorAt(i, voxelColor(voxels[i], "sunny"));
-    }
-    meshRef.current.instanceMatrix.needsUpdate = true;
-    if(meshRef.current.instanceColor) meshRef.current.instanceColor.needsUpdate = true;
-  }, [voxels]);
+  useEffect(() => {
+    transitionStart.current = Date.now();
+  }, [weather]);
 
-  // Transição gradual: a cada frame pinta um lote de blocos
   useFrame(() => {
     if(!meshRef.current) return;
+    const elapsed = (Date.now() - transitionStart.current) / 1000;
+    const progress = Math.min(elapsed / 15, 1); // 15 segundos para transição completa
 
-    // Detecta troca de clima
-    if(lastWeather.current !== weather) {
-      lastWeather.current = weather;
-      // Cria ordem aleatória de índices
-      const order = Array.from({length: voxels.length}, (_,i) => i);
-      // Fisher-Yates shuffle
-      for(let i=order.length-1;i>0;i--) {
-        const j=Math.floor(hash(i,weather.length,0)*i);
-        [order[i],order[j]]=[order[j],order[i]];
-      }
-      shuffledOrder.current = order;
-      transitionIndex.current = 0;
+    for(let i=0; i<voxels.length; i++) {
+      const v = voxels[i];
+      if(v.cluster === -1) continue; // Itens estáticos (árvores)
+      
+      // Cluster noise mapeado de [-1, 1] para [0, 1]
+      const normalizedCluster = (v.cluster + 1) / 2;
+      const color = normalizedCluster < progress ? v.colorWeather : v.colorSunny;
+      meshRef.current.setColorAt(i, color);
     }
-
-    // Pinta ~800 blocos por frame (~18s para 100k blocos a 60fps)
-    if(transitionIndex.current < voxels.length) {
-      const batchSize = Math.min(800, voxels.length - transitionIndex.current);
-      for(let b=0; b<batchSize; b++) {
-        const idx = shuffledOrder.current[transitionIndex.current + b];
-        meshRef.current.setColorAt(idx, voxelColor(voxels[idx], weather));
-      }
-      transitionIndex.current += batchSize;
-      meshRef.current.instanceColor!.needsUpdate = true;
-    }
+    meshRef.current.instanceColor!.needsUpdate = true;
   });
+
+  useLayoutEffect(() => {
+    const dummy = new THREE.Object3D();
+    voxels.forEach((v, i) => {
+      dummy.position.set(...v.pos);
+      dummy.updateMatrix();
+      meshRef.current.setMatrixAt(i, dummy.matrix);
+      meshRef.current.setColorAt(i, v.colorSunny);
+    });
+    meshRef.current.instanceMatrix.needsUpdate = true;
+    meshRef.current.instanceColor!.needsUpdate = true;
+  }, [voxels]);
 
   return (
     <instancedMesh ref={meshRef} args={[undefined, undefined, voxels.length]} frustumCulled={false}>
       <boxGeometry args={[1, 1, 1]} />
-      <meshStandardMaterial roughness={0.9} flatShading />
+      <meshStandardMaterial roughness={0.8} flatShading />
     </instancedMesh>
   );
 }
@@ -278,140 +258,49 @@ function PlanetBody() {
 function Rotator({children}:{children:React.ReactNode}) {
   const ref = useRef<THREE.Group>(null!);
   const {weather} = useGameState();
-  useFrame((_,d)=>{ ref.current.rotation.y += d*(weather==="storm"?0.12:0.035); });
+  useFrame((_,d)=>{ ref.current.rotation.y += d*(weather==="storm"?0.15:0.04); });
   return <group ref={ref}>{children}</group>;
 }
 
 /* ═══════ ATMOSFERA ═══════ */
 function Atmosphere() {
-  const {hour,weather}=useGameState();
-  const {scene}=useThree();
-  const target=useRef(new THREE.Color("#070e2b"));
-  const fogTarget=useRef({near:R*8,far:R*12,color:new THREE.Color("#334155")});
-
-  useFrame((_,delta)=>{
-    let bg="#070e2b";
+  const { hour, weather } = useGameState();
+  const { scene } = useThree();
+  useFrame((_,delta) => {
+    let bg = "#070e2b";
     if(weather==="storm") bg="#0a0a0f";
     else if(weather==="fog") bg="#1e293b";
-    else if(weather==="rain") bg="#0d1025";
-    else if(weather==="snow") bg="#101828";
-    else if(hour<5) bg="#020408";
-    else if(hour<7) bg="#1a0e3a";
-    else if(hour<8) bg="#1e1b4b";
-    else if(hour<11) bg="#0c1445";
-    else if(hour<16) bg="#070e2b";
-    else if(hour<18) bg="#1a1040";
-    else if(hour<20) bg="#12082a";
-    else bg="#020408";
-
-    target.current.set(bg);
-    (scene.background as THREE.Color).lerp(target.current, delta*3);
-
-    if(weather==="fog"){fogTarget.current={near:R*0.6,far:R*2.5,color:new THREE.Color("#334155")};}
-    else if(weather==="storm"){fogTarget.current={near:R*0.8,far:R*3,color:new THREE.Color("#0f172a")};}
-    else if(weather==="rain"){fogTarget.current={near:R*2,far:R*5,color:new THREE.Color("#1a2332")};}
-    else if(weather==="snow"){fogTarget.current={near:R*1.5,far:R*4,color:new THREE.Color("#1e293b")};}
-    else{fogTarget.current={near:R*10,far:R*15,color:new THREE.Color("#070e2b")};}
-
-    if(!scene.fog) scene.fog=new THREE.Fog("#070e2b",R*10,R*15);
-    const f=scene.fog as THREE.Fog;
-    f.color.lerp(fogTarget.current.color, delta*2);
-    f.near+=(fogTarget.current.near-f.near)*delta*2;
-    f.far+=(fogTarget.current.far-f.far)*delta*2;
+    else if(hour<6 || hour>20) bg="#020408";
+    (scene.background as THREE.Color).lerp(new THREE.Color(bg), delta);
+    if(weather==="fog") scene.fog = new THREE.Fog(bg, R, R*3);
+    else scene.fog = null;
   });
-
-  return <color attach="background" args={["#070e2b"]}/>;
+  return null;
 }
 
-/* ═══════ SOL ═══════ */
 function Sun() {
-  const {hour,weather}=useGameState();
-  const ref=useRef<THREE.DirectionalLight>(null!);
-  const ambRef=useRef<THREE.AmbientLight>(null!);
-  useFrame(()=>{
-    if(!ref.current) return;
-    const a=((hour-6)/24)*Math.PI*2;
-    ref.current.position.set(Math.cos(a)*R*4,Math.sin(a)*R*4,Math.sin(a)*R*2);
-    const day=Math.max(0,Math.sin(a));
-    const dim=weather==="storm"?0.25:weather==="fog"?0.5:1;
-    ref.current.intensity=(0.15+day*1.5)*dim;
-    ref.current.color.set(day>0.3?"#fef3c7":"#c4b5fd");
-    if(ambRef.current) ambRef.current.intensity=(0.15+day*0.4)*dim;
+  const { hour } = useGameState();
+  const ref = useRef<THREE.DirectionalLight>(null!);
+  useFrame(() => {
+    const a = ((hour-6)/24)*Math.PI*2;
+    ref.current.position.set(Math.cos(a)*200, Math.sin(a)*200, 50);
+    ref.current.intensity = Math.max(0, Math.sin(a))*1.8 + 0.15;
   });
-  return <><directionalLight ref={ref} color="#fef3c7"/><ambientLight ref={ambRef} intensity={0.3}/></>;
+  return <directionalLight ref={ref} color="#fff4d6" castShadow />;
 }
 
-/* ═══════ PARTÍCULAS ═══════ */
-function WeatherFX() {
-  const {weather}=useGameState();
-  const rainRef=useRef<THREE.Points>(null!);
-  const snowRef=useRef<THREE.Points>(null!);
-  const sp=R*3;
-
-  const rainGeo=useMemo(()=>{
-    const p=new Float32Array(2500*3);
-    for(let i=0;i<2500;i++){p[i*3]=(Math.random()-0.5)*sp;p[i*3+1]=Math.random()*sp-sp/3;p[i*3+2]=(Math.random()-0.5)*sp;}
-    const g=new THREE.BufferGeometry();g.setAttribute("position",new THREE.BufferAttribute(p,3));return g;
-  },[sp]);
-
-  const snowGeo=useMemo(()=>{
-    const p=new Float32Array(1200*3);
-    for(let i=0;i<1200;i++){p[i*3]=(Math.random()-0.5)*sp;p[i*3+1]=Math.random()*sp-sp/3;p[i*3+2]=(Math.random()-0.5)*sp;}
-    const g=new THREE.BufferGeometry();g.setAttribute("position",new THREE.BufferAttribute(p,3));return g;
-  },[sp]);
-
-  useFrame((_,delta)=>{
-    const isRain=weather==="rain"||weather==="storm";
-    const isSnow=weather==="snow";
-
-    if(rainRef.current){
-      const m=rainRef.current.material as THREE.PointsMaterial;
-      m.opacity+=(isRain?0.6:0-m.opacity)*delta*2;
-      if(isRain){
-        const pos=rainRef.current.geometry.attributes.position as THREE.BufferAttribute;
-        const speed=weather==="storm"?80:40;
-        const wind=weather==="storm"?delta*15:delta*3;
-        for(let i=0;i<pos.count;i++){
-          pos.setY(i,pos.getY(i)-delta*speed);
-          pos.setX(i,pos.getX(i)+wind);
-          if(pos.getY(i)<-sp/2){pos.setY(i,sp/2);pos.setX(i,(Math.random()-0.5)*sp);}
-        }
-        pos.needsUpdate=true;
-      }
-    }
-    if(snowRef.current){
-      const m=snowRef.current.material as THREE.PointsMaterial;
-      m.opacity+=(isSnow?0.7:0-m.opacity)*delta*2;
-      if(isSnow){
-        const pos=snowRef.current.geometry.attributes.position as THREE.BufferAttribute;
-        for(let i=0;i<pos.count;i++){
-          pos.setY(i,pos.getY(i)-delta*8);
-          pos.setX(i,pos.getX(i)+Math.sin(pos.getY(i)*0.1+i)*delta*2);
-          if(pos.getY(i)<-sp/2){pos.setY(i,sp/2);pos.setX(i,(Math.random()-0.5)*sp);}
-        }
-        pos.needsUpdate=true;
-      }
-    }
-  });
-
-  return <>
-    <points ref={rainRef} geometry={rainGeo}><pointsMaterial color="#7dd3fc" size={0.35} transparent opacity={0} depthWrite={false}/></points>
-    <points ref={snowRef} geometry={snowGeo}><pointsMaterial color="#e0f2fe" size={1.2} transparent opacity={0} depthWrite={false}/></points>
-  </>;
-}
-
-/* ═══════ CANVAS ═══════ */
 export default function VoxelPlanet() {
-  const {weatherPanelOpen,diaryOpen}=useGameState();
+  const { weatherPanelOpen, diaryOpen, weather } = useGameState();
   return (
     <div className="absolute inset-0">
-      <Canvas camera={{position:[0,15,R*2.8],fov:45}} dpr={[1,1.5]}>
-        <Atmosphere/>
-        <Sun/>
-        <Rotator><PlanetBody/></Rotator>
-        <WeatherFX/>
-        <Stars radius={R*6} depth={R*2} count={5000} factor={6} fade speed={0.3}/>
-        <OrbitControls enabled={!weatherPanelOpen&&!diaryOpen} enablePan={false} minDistance={R*1.3} maxDistance={R*4.5} enableDamping dampingFactor={0.05}/>
+      <Canvas camera={{ position: [0, 40, 160], fov: 45 }} dpr={[1, 1.5]}>
+        <Atmosphere />
+        <ambientLight intensity={0.4} />
+        <Sun />
+        <Rotator><PlanetBody /></Rotator>
+        <Stars radius={300} count={6000} factor={7} fade />
+        {weather === "sunny" && <Sparkles count={100} scale={R * 3} size={4} speed={0.4} color="#fde68a" />}
+        <OrbitControls enabled={!weatherPanelOpen && !diaryOpen} enablePan={false} minDistance={80} maxDistance={280} />
       </Canvas>
     </div>
   );
