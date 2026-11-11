@@ -75,11 +75,22 @@ const HOLE_DIR = norm([-0.78, 0.08, -0.62]);
 const TREE_DIR = norm([0.48, 0.12, 0.86]);
 const LAKE_DIR = norm([0.2, -0.6, -0.4]);
 const CAVE_DIR = norm([-0.85, -0.15, -0.55]);
+const MTN_1 = norm([0.75, 0.55, -0.30]);
+const MTN_2 = norm([-0.50, 0.65, 0.50]);
+const MTN_3 = norm([0.10, -0.80, 0.55]);
 
 function terrainHeight(nx: number, ny: number, nz: number): number {
   const dir: [number, number, number] = [nx, ny, nz];
   const hills = (fbm(nx * 2.5, ny * 2.5, nz * 2.5, 4) - 0.3) * 8;
   const smallPeaks = Math.pow(Math.max(0, fbm(nx * 5, ny * 5, nz * 5, 2) - 0.4), 2) * 15;
+
+  // 3 Montanhas com picos gelados (tamanhos variados)
+  const infl = (target: [number,number,number], thr: number) => {
+    const d = dot3(dir, target); if (d <= thr) return 0; const t = (d - thr) / (1 - thr); return t * t;
+  };
+  const mountains = infl(MTN_1, 0.94) * 22   // grande
+                   + infl(MTN_2, 0.95) * 16   // média
+                   + infl(MTN_3, 0.96) * 12;  // pequena
 
   const dH = dot3(dir, HOLE_DIR);
   let crater = 0;
@@ -97,14 +108,16 @@ function terrainHeight(nx: number, ny: number, nz: number): number {
     lake = -6 * (t * t * (3 - 2 * t));
   }
 
-  return hills + smallPeaks + crater + lake;
+  return hills + smallPeaks + mountains + crater + lake;
 }
 
 function baseColor(h: number, n: number, nx: number, ny: number, nz: number, dist: number): THREE.Color {
   const dL = dot3([nx, ny, nz], LAKE_DIR);
   if (dL > 0.93 && dist < R - 2) return C.water;
-  if (h > 12) return n > 0.5 ? C.snow1 : C.snow2;
-  if (h > 6) return n > 0.5 ? C.stone1 : C.stone2;
+  if (h > 16) return n > 0.5 ? C.snow1 : C.snow2;       // pico gelado
+  if (h > 10) return n > 0.6 ? C.snow1 : C.stone1;       // pedra com neve
+  if (h > 6) return n > 0.5 ? C.stone1 : C.stone2;       // pedra
+  if (h > 4) return n > 0.6 ? C.stone2 : C.grass3;        // encosta
   if (h < -12) return C.craterFloor;
   if (n > 0.8) return C.dirt1;
   return n > 0.6 ? C.grass1 : n > 0.3 ? C.grass2 : C.grass3;
@@ -198,22 +211,60 @@ function generatePlanet(): Voxel[] {
     data.push({ pos:[rx,ry,rz], colorSunny:col, colorWeather:col, cluster:-1, isTree:true, h:99, n:0.5, dist:Math.sqrt(rx*rx+ry*ry+rz*rz) });
   };
 
-  // regular trees
-  let smallTrees = 0;
-  for (let i = 0; i < data.length && smallTrees < 150; i += 40) {
+  // Árvores pequenas, médias e arbustos espalhados pela grama
+  let treeCount = 0;
+  let bushCount = 0;
+  const fruitColor = new THREE.Color("#ef4444"); // frutas vermelhas
+  const berryColor = new THREE.Color("#a855f7"); // frutas roxas
+
+  for (let i = 0; i < data.length; i += 25) {
     const v = data[i];
-    if (v.colorSunny !== C.grass1 && v.colorSunny !== C.grass2) continue;
+    const isGrass = v.colorSunny === C.grass1 || v.colorSunny === C.grass2 || v.colorSunny === C.grass3;
+    if (!isGrass) continue;
     const [px, py, pz] = v.pos;
-    if (hash(px, py, pz) < 0.97) continue;
+    const n = hash(px, py, pz);
     const dist = Math.sqrt(px*px+py*py+pz*pz);
     const ux = px / dist, uy = py / dist, uz = pz / dist;
-    const th = 2 + Math.floor(hash(px,py,pz) * 2);
-    for (let t = 1; t <= th; t++) addTree(px+ux*t, py+uy*t, pz+uz*t, C.trunk);
-    const cx = px + ux * (th + 1), cy = py + uy * (th + 1), cz = pz + uz * (th + 1);
-    for (let dx=-2; dx<=2; dx++) for (let dy=-2; dy<=2; dy++) for (let dz=-2; dz<=2; dz++) {
-      if (dx*dx+dy*dy+dz*dz < 5) addTree(cx+dx, cy+dy, cz+dz, C.leaf2);
+
+    if (n > 0.96 && treeCount < 200) {
+      // Árvore pequena ou média (altura varia de 2 a 5)
+      const th = 2 + Math.floor(n * 4);
+      const crownR = th > 3 ? 3 : 2; // copa maior para árvores mais altas
+
+      for (let t = 1; t <= th; t++) addTree(px+ux*t, py+uy*t, pz+uz*t, C.trunk);
+
+      const cx = px + ux * (th + 1), cy = py + uy * (th + 1), cz = pz + uz * (th + 1);
+      for (let dx=-crownR; dx<=crownR; dx++)
+      for (let dy=-crownR; dy<=crownR; dy++)
+      for (let dz=-crownR; dz<=crownR; dz++) {
+        if (dx*dx+dy*dy+dz*dz <= crownR*crownR && hash(dx+px,dy+py,dz+pz) > 0.2) {
+          const ln = hash(dx*3+px, dy*3+py, dz*3+pz);
+          addTree(cx+dx, cy+dy, cz+dz, ln > 0.5 ? C.leaf1 : C.leaf2);
+        }
+      }
+      treeCount++;
+
+    } else if (n > 0.93 && n <= 0.96 && bushCount < 120) {
+      // Arbusto frutífero (baixo e largo, com frutas coloridas)
+      const cx = px + ux * 1.5, cy = py + uy * 1.5, cz = pz + uz * 1.5;
+      const bushR = 2;
+      for (let dx=-bushR; dx<=bushR; dx++)
+      for (let dy=-bushR; dy<=bushR; dy++)
+      for (let dz=-bushR; dz<=bushR; dz++) {
+        const dd = dx*dx+dy*dy+dz*dz;
+        if (dd <= bushR*bushR + 1 && hash(dx+px*2,dy+py*2,dz+pz*2) > 0.25) {
+          const fn = hash(dx+px, dy+py*3, dz+pz);
+          let col: THREE.Color;
+          if (fn > 0.88) col = fruitColor;       // fruta vermelha
+          else if (fn > 0.82) col = berryColor;   // fruta roxa
+          else col = fn > 0.5 ? C.leaf1 : C.leafBright;
+          addTree(cx+dx, cy+dy, cz+dz, col);
+        }
+      }
+      // Tronquinho curto
+      addTree(px+ux, py+uy, pz+uz, C.trunkDark);
+      bushCount++;
     }
-    smallTrees++;
   }
 
   // Deku tree
