@@ -97,7 +97,7 @@ function getVoxelData(x:number, y:number, z:number, weather: WeatherType, progre
   const h = terrainHeight(nx,ny,nz);
   const surfDist = R + h;
   if(dist > surfDist + 0.3) return null;
-  if(dist < surfDist - 2.5) return null; // Apenas casca grossa
+  if(dist < surfDist - 1.0) return null; // Casca de 1 bloco
 
   const n = hash(x,y,z);
   const clusterNoise = noise3d(x*0.15, y*0.15, z*0.15); // Ruído para manchas (clusters)
@@ -135,7 +135,7 @@ type Voxel = { pos:[number,number,number]; colorSunny:THREE.Color; colorWeather:
 function generatePlanet(weather: WeatherType): Voxel[] {
   const data: Voxel[]=[];
   const occ=new Set<string>();
-  const maxR = R + 22, minR = R - 22;
+  const maxR = R + 15, minR = R - 18;
 
   for(let x=-maxR; x<=maxR; x++)
   for(let y=-maxR; y<=maxR; y++)
@@ -209,42 +209,68 @@ function generatePlanet(weather: WeatherType): Voxel[] {
 function PlanetBody() {
   const { weather } = useGameState();
   const meshRef = useRef<THREE.InstancedMesh>(null!);
-  const voxels = useMemo(() => generatePlanet(weather), [weather]);
-  const transitionStart = useRef(Date.now());
-  const prevWeather = useRef<WeatherType>("sunny");
 
-  useEffect(() => {
-    transitionStart.current = Date.now();
-  }, [weather]);
+  // Gerar uma vez só, sem depender de weather
+  const voxels = useMemo(() => generatePlanet("sunny"), []);
 
-  useFrame(() => {
-    if(!meshRef.current) return;
-    const elapsed = (Date.now() - transitionStart.current) / 1000;
-    const progress = Math.min(elapsed / 15, 1); // 15 segundos para transição completa
+  // Controle de transição
+  const lastWeather = useRef<WeatherType>("sunny");
+  const transitionQueue = useRef<number[]>([]); // índices dos blocos que faltam mudar
+  const transitionDone = useRef(true);
 
-    for(let i=0; i<voxels.length; i++) {
-      const v = voxels[i];
-      if(v.cluster === -1) continue; // Itens estáticos (árvores)
-      
-      // Cluster noise mapeado de [-1, 1] para [0, 1]
-      const normalizedCluster = (v.cluster + 1) / 2;
-      const color = normalizedCluster < progress ? v.colorWeather : v.colorSunny;
-      meshRef.current.setColorAt(i, color);
-    }
-    meshRef.current.instanceColor!.needsUpdate = true;
-  });
-
+  // Posições (uma vez)
   useLayoutEffect(() => {
     const dummy = new THREE.Object3D();
-    voxels.forEach((v, i) => {
-      dummy.position.set(...v.pos);
+    for (let i = 0; i < voxels.length; i++) {
+      dummy.position.set(...voxels[i].pos);
       dummy.updateMatrix();
       meshRef.current.setMatrixAt(i, dummy.matrix);
-      meshRef.current.setColorAt(i, v.colorSunny);
-    });
+      meshRef.current.setColorAt(i, voxels[i].colorSunny);
+    }
     meshRef.current.instanceMatrix.needsUpdate = true;
     meshRef.current.instanceColor!.needsUpdate = true;
   }, [voxels]);
+
+  useFrame(() => {
+    if (!meshRef.current) return;
+
+    // Detecta troca de clima → cria fila de transição
+    if (lastWeather.current !== weather) {
+      lastWeather.current = weather;
+
+      // Pré-computa as cores alvo para este clima
+      for (let i = 0; i < voxels.length; i++) {
+        const v = voxels[i];
+        if (v.cluster === -1) continue; // árvores não mudam
+        const [x, y, z] = v.pos;
+        v.colorWeather = getVoxelData(x, y, z, weather, 1.1) || v.colorSunny;
+      }
+
+      // Ordena os índices pelo valor de cluster (manchas crescentes)
+      const indices: { idx: number; cluster: number }[] = [];
+      for (let i = 0; i < voxels.length; i++) {
+        if (voxels[i].cluster !== -1) indices.push({ idx: i, cluster: voxels[i].cluster });
+      }
+      indices.sort((a, b) => a.cluster - b.cluster);
+      transitionQueue.current = indices.map(i => i.idx);
+      transitionDone.current = false;
+    }
+
+    // Processa lote: ~300 blocos por frame = ~15s para 55k blocos a 60fps
+    if (!transitionDone.current) {
+      const queue = transitionQueue.current;
+      const batchSize = Math.min(300, queue.length);
+      if (batchSize === 0) {
+        transitionDone.current = true;
+        return;
+      }
+      const batch = queue.splice(0, batchSize);
+      for (const idx of batch) {
+        meshRef.current.setColorAt(idx, voxels[idx].colorWeather);
+      }
+      meshRef.current.instanceColor!.needsUpdate = true;
+    }
+  });
 
   return (
     <instancedMesh ref={meshRef} args={[undefined, undefined, voxels.length]} frustumCulled={false}>
@@ -266,16 +292,36 @@ function Rotator({children}:{children:React.ReactNode}) {
 function Atmosphere() {
   const { hour, weather } = useGameState();
   const { scene } = useThree();
+
+  // Inicializa background no mount
+  useLayoutEffect(() => {
+    scene.background = new THREE.Color("#070e2b");
+  }, [scene]);
+
   useFrame((_,delta) => {
+    if (!scene.background) scene.background = new THREE.Color("#070e2b");
     let bg = "#070e2b";
     if(weather==="storm") bg="#0a0a0f";
     else if(weather==="fog") bg="#1e293b";
-    else if(hour<6 || hour>20) bg="#020408";
-    (scene.background as THREE.Color).lerp(new THREE.Color(bg), delta);
-    if(weather==="fog") scene.fog = new THREE.Fog(bg, R, R*3);
+    else if(weather==="rain") bg="#0d1025";
+    else if(weather==="snow") bg="#101828";
+    else if(hour<5) bg="#020408";
+    else if(hour<7) bg="#1a0e3a";
+    else if(hour<8) bg="#1e1b4b";
+    else if(hour<11) bg="#0c1445";
+    else if(hour<16) bg="#070e2b";
+    else if(hour<18) bg="#1a1040";
+    else if(hour<20) bg="#12082a";
+    else bg="#020408";
+
+    (scene.background as THREE.Color).lerp(new THREE.Color(bg), delta*2);
+    
+    if(weather==="fog") scene.fog = new THREE.Fog("#334155", R*0.6, R*3);
+    else if(weather==="storm") scene.fog = new THREE.Fog("#0f172a", R, R*3.5);
+    else if(weather==="rain") scene.fog = new THREE.Fog("#1a2332", R*2, R*5);
     else scene.fog = null;
   });
-  return null;
+  return <color attach="background" args={["#070e2b"]} />;
 }
 
 function Sun() {
