@@ -199,80 +199,136 @@ function generatePlanet(): Voxel[] {
     smallTrees++;
   }
 
-  // Árvore Monumental Sólida
+  // ═══════ GREAT DEKU TREE (Estilo Zelda) ═══════
   const [tx,ty,tz]=TREE_DIR;
   const hT=terrainHeight(tx,ty,tz);
   const bx=tx*(R+hT), by=ty*(R+hT), bz=tz*(R+hT);
-  const trunkH = 40;
-  
+
+  // Helper para adicionar bloco de árvore sem duplicata
+  const addTree = (px:number, py:number, pz:number, col:THREE.Color) => {
+    const rx=Math.round(px), ry=Math.round(py), rz=Math.round(pz);
+    const key=`${rx},${ry},${rz}`;
+    if(!occ.has(key)) {
+      data.push({ pos:[rx,ry,rz], colorSunny:col, colorWeather:col, cluster:-1 });
+      occ.add(key);
+    }
+  };
+
+  // Tronco: Base ENORME (raio 8), afina pro meio (raio 4), alarga de novo perto do topo (raio 5)
+  // Perfil: barriga na base, cintura no meio, alarga no topo antes da copa
+  const trunkH = 30;
   for(let i=0; i<=trunkH; i++) {
     const cx=bx+tx*i, cy=by+ty*i, cz=bz+tz*i;
-    const radius = Math.max(1, Math.round(5 * (1 - i/trunkH))); 
-    for(let dx=-radius; dx<=radius; dx++) 
-    for(let dy=-radius; dy<=radius; dy++) 
-    for(let dz=-radius; dz<=radius; dz++) {
-      if(dx*dx+dy*dy+dz*dz <= radius*radius) {
-        const px=Math.round(cx+dx), py=Math.round(cy+dy), pz=Math.round(cz+dz);
-        if(!occ.has(`${px},${py},${pz}`)) {
-          const col = hash(dx+i,dy+i,dz+i)>0.6?C.bark:C.trunk;
-          data.push({ pos:[px,py,pz], colorSunny:col, colorWeather:col, cluster:-1 });
-          occ.add(`${px},${py},${pz}`);
-        }
+    const progress = i / trunkH;
+    
+    // Perfil do tronco: gordo na base, fino no meio, alarga perto do topo
+    let radius: number;
+    if(progress < 0.15) {
+      // Base muito larga (raízes/base do tronco)
+      radius = 8 - progress * 12;
+    } else if(progress < 0.6) {
+      // Meio afinando
+      const t = (progress - 0.15) / 0.45;
+      radius = 6.2 - t * 2.5;
+    } else {
+      // Topo alargando antes da copa
+      const t = (progress - 0.6) / 0.4;
+      radius = 3.7 + t * 1.5;
+    }
+    const r = Math.max(2, Math.round(radius));
+
+    for(let dx=-r; dx<=r; dx++) 
+    for(let dy=-r; dy<=r; dy++) 
+    for(let dz=-r; dz<=r; dz++) {
+      if(dx*dx+dy*dy+dz*dz <= r*r) {
+        const n = hash(dx+i*7,dy+i*3,dz+i*11);
+        addTree(cx+dx, cy+dy, cz+dz, n>0.7?C.bark:n>0.25?C.trunk:C.trunkDark);
       }
     }
+  }
 
-    if(i > 15 && i % 8 === 0) {
-      const ang = i * 2.1;
-      const bLen = 20 - (i/3); 
-      let tipX=cx, tipY=cy, tipZ=cz;
+  // Raízes Massivas (6 raízes grossas saindo da base)
+  for(let r=0; r<6; r++) {
+    const ang = (r/6)*Math.PI*2 + 0.3;
+    // Dois vetores perpendiculares à normal da superfície
+    const perpX = Math.cos(ang);
+    const perpZ = Math.sin(ang);
+    
+    for(let seg=0; seg<10; seg++) {
+      const spread = seg * 2.5;
+      const drop = seg * 0.8;
+      const rx = bx + perpX * spread - tx * drop;
+      const ry = by + perpZ * spread * 0.3 - ty * drop;
+      const rz = bz + perpZ * spread - tz * drop;
       
-      for(let j=0; j<bLen; j++) {
-        tipX=Math.round(cx+Math.cos(ang)*j*1.5+tx*j*0.5);
-        tipY=Math.round(cy+j*0.4+ty*j*0.5);
-        tipZ=Math.round(cz+Math.sin(ang)*j*1.5+tz*j*0.5);
-        
-        const brR = j < bLen*0.3 ? 2 : j < bLen*0.7 ? 1 : 0;
-        for(let lx=-brR; lx<=brR; lx++) 
-        for(let ly=-brR; ly<=brR; ly++) 
-        for(let lz=-brR; lz<=brR; lz++) {
-          if(lx*lx+ly*ly+lz*lz <= brR*brR) {
-            const px=tipX+lx, py=tipY+ly, pz=tipZ+lz;
-            if(!occ.has(`${px},${py},${pz}`)) {
-              data.push({ pos:[px,py,pz], colorSunny:C.trunk, colorWeather:C.trunk, cluster:-1 });
-              occ.add(`${px},${py},${pz}`);
-            }
-          }
-        }
-      }
-      
-      // Copa maciça na ponta do galho
-      for(let lx=-6; lx<=6; lx++) 
-      for(let ly=-6; ly<=6; ly++) 
-      for(let lz=-6; lz<=6; lz++) {
-        if(lx*lx+ly*ly+lz*lz < 32 && hash(lx+tipX,ly+tipY,lz+tipZ)>0.2) {
-           const px=tipX+lx, py=tipY+ly, pz=tipZ+lz;
-           if(!occ.has(`${px},${py},${pz}`)) {
-             const col = hash(lx,ly,lz)>0.5?C.leaf1:C.leaf2;
-             data.push({ pos:[px,py,pz], colorSunny:col, colorWeather:col, cluster:-1 });
-             occ.add(`${px},${py},${pz}`);
-           }
+      // Raiz grossa (raio 2 na base, afina)
+      const rootR = seg < 4 ? 3 : seg < 7 ? 2 : 1;
+      for(let dx=-rootR; dx<=rootR; dx++)
+      for(let dy=-rootR; dy<=rootR; dy++)
+      for(let dz=-rootR; dz<=rootR; dz++) {
+        if(dx*dx+dy*dy+dz*dz <= rootR*rootR) {
+          addTree(rx+dx, ry+dy, rz+dz, C.trunkDark);
         }
       }
     }
   }
+
+  // 3 Galhos curtos e grossos saindo do topo do tronco (antes da copa)
+  for(let br=0; br<3; br++) {
+    const ang = (br/3)*Math.PI*2 + 1.0;
+    const startI = 22 + br*2;
+    const scx=bx+tx*startI, scy=by+ty*startI, scz=bz+tz*startI;
+    
+    let tipX=scx, tipY=scy, tipZ=scz;
+    for(let j=0; j<10; j++) {
+      tipX = scx + Math.cos(ang)*j*1.8 + tx*j*0.6;
+      tipY = scy + Math.sin(ang)*j*0.3 + ty*j*0.8;
+      tipZ = scz + Math.sin(ang)*j*1.8 + tz*j*0.6;
+      
+      const brR = j < 3 ? 2 : 1;
+      for(let dx=-brR; dx<=brR; dx++)
+      for(let dy=-brR; dy<=brR; dy++)
+      for(let dz=-brR; dz<=brR; dz++) {
+        if(dx*dx+dy*dy+dz*dz <= brR*brR) addTree(tipX+dx, tipY+dy, tipZ+dz, C.trunk);
+      }
+    }
+    
+    // Copa pequena na ponta do galho
+    for(let lx=-5; lx<=5; lx++)
+    for(let ly=-5; ly<=5; ly++)
+    for(let lz=-5; lz<=5; lz++) {
+      if(lx*lx+ly*ly+lz*lz < 22 && hash(lx+br*11,ly+br*7,lz+br*3) > 0.2) {
+        const col = hash(lx,ly,lz)>0.5?C.leaf1:C.leaf2;
+        addTree(tipX+lx, tipY+ly, tipZ+lz, col);
+      }
+    }
+  }
+
+  // Copa Principal ENORME e ACHATADA (Elipsóide: largo 16, alto 6)
+  const topX=bx+tx*(trunkH+3), topY=by+ty*(trunkH+3), topZ=bz+tz*(trunkH+3);
+  const crownRadiusH = 16; // Raio horizontal (muito largo)
+  const crownRadiusV = 6;  // Raio vertical (achatado)
   
-  // Copa do Topo Central (Maciça)
-  const topX=bx+tx*(trunkH+4), topY=by+ty*(trunkH+4), topZ=bz+tz*(trunkH+4);
-  for(let lx=-10; lx<=10; lx++) 
-  for(let ly=-10; ly<=10; ly++) 
-  for(let lz=-10; lz<=10; lz++) {
-    if(lx*lx+ly*ly+lz*lz < 90 && hash(lx+99,ly+33,lz+77)>0.15) {
-       const px=Math.round(topX+lx), py=Math.round(topY+ly), pz=Math.round(topZ+lz);
-       if(!occ.has(`${px},${py},${pz}`)) {
-         const col = hash(lx,ly,lz)>0.5?C.leafBright:C.leaf1;
-         data.push({ pos:[px,py,pz], colorSunny:col, colorWeather:col, cluster:-1 });
-         occ.add(`${px},${py},${pz}`);
-       }
+  // Precisamos de 2 vetores perpendiculares à direção radial para achatar corretamente
+  // Usamos a projeção na direção do tronco (tx,ty,tz) como "up"
+  for(let lx=-crownRadiusH; lx<=crownRadiusH; lx++)
+  for(let ly=-crownRadiusH; ly<=crownRadiusH; ly++)
+  for(let lz=-crownRadiusH; lz<=crownRadiusH; lz++) {
+    // Componente radial (na direção do tronco) = "altura" da copa
+    const radialComponent = lx*tx + ly*ty + lz*tz;
+    // Componente tangencial = "largura" da copa
+    const tangX = lx - radialComponent*tx;
+    const tangY = ly - radialComponent*ty;
+    const tangZ = lz - radialComponent*tz;
+    const tangDist = Math.sqrt(tangX*tangX + tangY*tangY + tangZ*tangZ);
+    
+    // Teste de elipsóide: (tangDist/radiusH)² + (radial/radiusV)² <= 1
+    const ellipse = (tangDist/crownRadiusH)**2 + (radialComponent/crownRadiusV)**2;
+    
+    if(ellipse <= 1.0 && hash(lx+99,ly+33,lz+77) > 0.12) {
+      const n = hash(lx*3+1, ly*3+2, lz*3+3);
+      const col = n>0.6?C.leafBright:n>0.35?C.leaf1:n>0.15?C.leaf2:C.leaf3;
+      addTree(topX+lx, topY+ly, topZ+lz, col);
     }
   }
 
