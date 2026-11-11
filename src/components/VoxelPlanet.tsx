@@ -517,7 +517,7 @@ function PlanetBody() {
 
     const queue = queueRef.current;
     const start = processedRef.current;
-    const batchSize = 35; // ~15s para 20k+ blocos
+    const batchSize = 4; // ~2.5 min
     const end = Math.min(start + batchSize, queue.length);
 
     for (let q = start; q < end; q++) {
@@ -533,7 +533,7 @@ function PlanetBody() {
   });
 
   return (
-    <instancedMesh ref={meshRef} args={[undefined, undefined, voxels.length]} frustumCulled={false}>
+    <instancedMesh ref={meshRef} name="planetInstancedMesh" args={[undefined, undefined, voxels.length]} frustumCulled={false}>
       <boxGeometry args={[1.02, 1.02, 1.02]} />
       <meshStandardMaterial roughness={0.8} flatShading />
     </instancedMesh>
@@ -541,10 +541,8 @@ function PlanetBody() {
 }
 
 function Rotator({children}:{children:React.ReactNode}) {
-  const ref = useRef<THREE.Group>(null!);
-  const {weather} = useGameState();
-  useFrame((_,d)=>{ ref.current.rotation.y += d*(weather==="storm"?0.15:0.04); });
-  return <group ref={ref}>{children}</group>;
+  // Planeta estático — a rotação atrapalha a movimentação natural
+  return <group>{children}</group>;
 }
 
 function Atmosphere() {
