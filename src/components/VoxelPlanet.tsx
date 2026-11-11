@@ -352,72 +352,121 @@ function WeatherFX() {
   const { weather } = useGameState();
   const rainRef = useRef<THREE.Points>(null!);
   const snowRef = useRef<THREE.Points>(null!);
-  const spread = R * 3;
 
-  const rainGeo = useMemo(() => {
-    const p = new Float32Array(1800 * 3);
-    for (let i = 0; i < 1800; i++) {
-      p[i*3] = (Math.random()-0.5)*spread;
-      p[i*3+1] = Math.random()*spread-spread/3;
-      p[i*3+2] = (Math.random()-0.5)*spread;
+  // Partículas nascem numa casca esférica acima da superfície e caem em direção ao centro
+  const innerR = R + 2;   // superfície do planeta
+  const outerR = R + 30;  // onde as partículas nascem
+
+  // Gera posições aleatórias numa casca esférica
+  const makeGeo = (count: number) => {
+    const p = new Float32Array(count * 3);
+    for (let i = 0; i < count; i++) {
+      // Ponto aleatório numa esfera entre innerR e outerR
+      const theta = Math.random() * Math.PI * 2;
+      const phi = Math.acos(2 * Math.random() - 1);
+      const dist = innerR + Math.random() * (outerR - innerR);
+      p[i * 3]     = Math.sin(phi) * Math.cos(theta) * dist;
+      p[i * 3 + 1] = Math.cos(phi) * dist;
+      p[i * 3 + 2] = Math.sin(phi) * Math.sin(theta) * dist;
     }
     const g = new THREE.BufferGeometry();
-    g.setAttribute("position", new THREE.BufferAttribute(p,3));
+    g.setAttribute("position", new THREE.BufferAttribute(p, 3));
     return g;
-  }, [spread]);
+  };
 
-  const snowGeo = useMemo(() => {
-    const p = new Float32Array(1200 * 3);
-    for (let i = 0; i < 1200; i++) {
-      p[i*3] = (Math.random()-0.5)*spread;
-      p[i*3+1] = Math.random()*spread-spread/3;
-      p[i*3+2] = (Math.random()-0.5)*spread;
-    }
-    const g = new THREE.BufferGeometry();
-    g.setAttribute("position", new THREE.BufferAttribute(p,3));
-    return g;
-  }, [spread]);
+  const rainGeo = useMemo(() => makeGeo(2000), []);
+  const snowGeo = useMemo(() => makeGeo(1200), []);
 
-  useFrame((_,delta) => {
+  // Reposiciona uma partícula na casca exterior (respawn)
+  const respawn = (pos: THREE.BufferAttribute, i: number) => {
+    const theta = Math.random() * Math.PI * 2;
+    const phi = Math.acos(2 * Math.random() - 1);
+    const dist = outerR - Math.random() * 5;
+    pos.setXYZ(
+      i,
+      Math.sin(phi) * Math.cos(theta) * dist,
+      Math.cos(phi) * dist,
+      Math.sin(phi) * Math.sin(theta) * dist,
+    );
+  };
+
+  useFrame((_, delta) => {
     const isRain = weather === "rain" || weather === "storm";
     const isSnow = weather === "snow";
 
-    if(rainRef.current) {
+    // ─── CHUVA ───
+    if (rainRef.current) {
       const mat = rainRef.current.material as THREE.PointsMaterial;
       mat.opacity += ((isRain ? 0.55 : 0) - mat.opacity) * delta * 2;
       mat.size = weather === "storm" ? 0.6 : 0.35;
-      if(isRain) {
+
+      if (isRain) {
         const pos = rainRef.current.geometry.attributes.position as THREE.BufferAttribute;
-        const speed = weather === "storm" ? 70 : 35;
-        const wind = weather === "storm" ? delta * 12 : delta * 2;
-        for(let i=0;i<pos.count;i++) {
-          pos.setY(i, pos.getY(i)-delta*speed);
-          pos.setX(i, pos.getX(i)+wind);
-          if(pos.getY(i)<-spread/2) { pos.setY(i, spread/2); pos.setX(i,(Math.random()-0.5)*spread); }
+        const speed = weather === "storm" ? 50 : 25;
+        const windStrength = weather === "storm" ? 8 : 2;
+
+        for (let i = 0; i < pos.count; i++) {
+          const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
+          const dist = Math.sqrt(x * x + y * y + z * z);
+
+          // Direção para o centro do planeta = gravidade
+          const nx = x / dist, ny = y / dist, nz = z / dist;
+
+          // Move em direção ao centro (gravidade esférica)
+          pos.setXYZ(
+            i,
+            x - nx * speed * delta + Math.sin(i + y * 0.1) * windStrength * delta,
+            y - ny * speed * delta,
+            z - nz * speed * delta + Math.cos(i + x * 0.1) * windStrength * delta * 0.5,
+          );
+
+          // Se atingiu a superfície, respawna no alto
+          if (dist < innerR) respawn(pos, i);
         }
         pos.needsUpdate = true;
       }
     }
 
-    if(snowRef.current) {
+    // ─── NEVE ───
+    if (snowRef.current) {
       const mat = snowRef.current.material as THREE.PointsMaterial;
       mat.opacity += ((isSnow ? 0.7 : 0) - mat.opacity) * delta * 2;
-      if(isSnow) {
+
+      if (isSnow) {
         const pos = snowRef.current.geometry.attributes.position as THREE.BufferAttribute;
-        for(let i=0;i<pos.count;i++) {
-          pos.setY(i, pos.getY(i)-delta*8);
-          pos.setX(i, pos.getX(i)+Math.sin(pos.getY(i)*0.1+i)*delta*1.5);
-          if(pos.getY(i)<-spread/2) { pos.setY(i, spread/2); pos.setX(i,(Math.random()-0.5)*spread); }
+        const speed = 6;
+
+        for (let i = 0; i < pos.count; i++) {
+          const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
+          const dist = Math.sqrt(x * x + y * y + z * z);
+          const nx = x / dist, ny = y / dist, nz = z / dist;
+
+          // Cai lentamente em direção ao centro com ondulação lateral
+          const drift = Math.sin(dist * 0.15 + i * 0.7) * 1.5;
+          pos.setXYZ(
+            i,
+            x - nx * speed * delta + drift * delta * (1 - nx * nx),
+            y - ny * speed * delta + drift * delta * (1 - ny * ny) * 0.5,
+            z - nz * speed * delta + drift * delta * (1 - nz * nz),
+          );
+
+          if (dist < innerR) respawn(pos, i);
         }
         pos.needsUpdate = true;
       }
     }
   });
 
-  return <>
-    <points ref={rainRef} geometry={rainGeo}><pointsMaterial color="#7dd3fc" size={0.35} transparent opacity={0} depthWrite={false}/></points>
-    <points ref={snowRef} geometry={snowGeo}><pointsMaterial color="#e0f2fe" size={1.2} transparent opacity={0} depthWrite={false}/></points>
-  </>;
+  return (
+    <>
+      <points ref={rainRef} geometry={rainGeo}>
+        <pointsMaterial color="#7dd3fc" size={0.35} transparent opacity={0} depthWrite={false} />
+      </points>
+      <points ref={snowRef} geometry={snowGeo}>
+        <pointsMaterial color="#e0f2fe" size={1.2} transparent opacity={0} depthWrite={false} />
+      </points>
+    </>
+  );
 }
 
 function PlanetBody() {
