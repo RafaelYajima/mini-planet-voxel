@@ -6,7 +6,7 @@ import WeatherPanel from "./WeatherPanel";
 import DiaryPanel   from "./DiaryPanel";
 import {
   BookOpen, Cloud, Maximize2, Minimize2,
-  ScanEye, ZoomIn, ZoomOut, Boxes,
+  ScanEye, ZoomIn, ZoomOut, Boxes, Camera,
 } from "lucide-react";
 import type { ZoomLevel } from "@/store/gameStore";
 import type { PointerEvent as ReactPointerEvent, MouseEvent as ReactMouseEvent, TouchEvent as ReactTouchEvent } from "react";
@@ -24,7 +24,13 @@ export default function HUD() {
   const state    = useGameState();
   const dispatch = useGameDispatch();
 
-  const { zenMode, weatherPanelOpen, diaryOpen, weather, zoom, level } = state;
+  const { zenMode, weatherPanelOpen, diaryOpen, weather, zoom, level, cameraView } = state;
+
+  const cameraLabels: Record<string, string> = {
+    orbit: "🌍 Órbita",
+    third: "🎮 3ª Pessoa",
+    first: "👁 1ª Pessoa",
+  };
 
   return (
     <>
@@ -86,6 +92,15 @@ export default function HUD() {
             >
               <BookOpen className="w-3.5 h-3.5" />
               <span className="hidden sm:inline">Diário</span>
+            </button>
+
+            {/* Câmera */}
+            <button
+              onClick={() => dispatch({ type: "TOGGLE_CAMERA_VIEW" })}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-emerald-400/30 bg-emerald-400/10 text-emerald-300 text-xs font-medium transition hover:bg-emerald-400/20"
+            >
+              <Camera className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">{cameraLabels[cameraView]}</span>
             </button>
 
             {/* Zen */}

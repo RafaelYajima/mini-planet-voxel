@@ -6,6 +6,7 @@ import { OrbitControls, Stars, Sparkles } from "@react-three/drei";
 import * as THREE from "three";
 import { useGameState } from "@/context/GameContext";
 import type { WeatherType } from "@/store/gameStore";
+import Player from "./Player";
 
 const R = 40;
 
@@ -544,7 +545,9 @@ function Sun() {
 }
 
 export default function VoxelPlanet() {
-  const { weatherPanelOpen, diaryOpen, weather } = useGameState();
+  const { weatherPanelOpen, diaryOpen, weather, cameraView } = useGameState();
+  const orbitEnabled = cameraView === "orbit" && !weatherPanelOpen && !diaryOpen;
+
   return (
     <div className="absolute inset-0">
       <Canvas camera={{ position: [0, 40, 160], fov: 45 }} dpr={[1, 1.5]}>
@@ -552,10 +555,11 @@ export default function VoxelPlanet() {
         <ambientLight intensity={0.4} />
         <Sun />
         <Rotator><PlanetBody /></Rotator>
+        <Player />
         <WeatherFX />
         <Stars radius={300} count={6000} factor={7} fade />
         {weather === "sunny" && <Sparkles count={80} scale={R*3} size={3} speed={0.4} color="#fde68a" />}
-        <OrbitControls enabled={!weatherPanelOpen && !diaryOpen} enablePan={false} minDistance={80} maxDistance={280} />
+        <OrbitControls enabled={orbitEnabled} enablePan={false} minDistance={80} maxDistance={280} />
       </Canvas>
     </div>
   );

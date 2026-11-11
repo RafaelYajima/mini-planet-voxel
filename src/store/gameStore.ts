@@ -6,6 +6,7 @@
 
 export type WeatherType = "sunny" | "rain" | "snow" | "fog" | "storm";
 export type ZoomLevel   = "macro" | "normal" | "micro";
+export type CameraView  = "orbit" | "third" | "first";
 
 export interface GameState {
   // Progressão
@@ -25,7 +26,8 @@ export interface GameState {
   // UI
   weatherPanelOpen: boolean;
   diaryOpen: boolean;
-  entered: boolean;      // passou da loading screen
+  entered: boolean;
+  cameraView: CameraView;
 }
 
 export type GameAction =
@@ -37,7 +39,8 @@ export type GameAction =
   | { type: "TOGGLE_ZEN" }
   | { type: "TOGGLE_WEATHER_PANEL" }
   | { type: "TOGGLE_DIARY" }
-  | { type: "GAIN_XP"; payload: number };
+  | { type: "GAIN_XP"; payload: number }
+  | { type: "TOGGLE_CAMERA_VIEW" };
 
 export function xpForLevel(level: number) {
   return level * 100;
@@ -55,6 +58,7 @@ export const initialState: GameState = {
   weatherPanelOpen: false,
   diaryOpen: false,
   entered: false,
+  cameraView: "orbit" as CameraView,
 };
 
 export function gameReducer(state: GameState, action: GameAction): GameState {
@@ -101,6 +105,12 @@ export function gameReducer(state: GameState, action: GameAction): GameState {
         };
       }
       return { ...state, xp: newXp };
+    }
+
+    case "TOGGLE_CAMERA_VIEW": {
+      const views: CameraView[] = ["orbit", "third", "first"];
+      const idx = views.indexOf(state.cameraView);
+      return { ...state, cameraView: views[(idx + 1) % views.length] };
     }
 
     default:
