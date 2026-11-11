@@ -1,6 +1,6 @@
 "use client";
 
-import { useLayoutEffect, useMemo, useRef, useEffect, useState } from "react";
+import { useLayoutEffect, useMemo, useRef, useEffect } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { OrbitControls, Stars, Sparkles } from "@react-three/drei";
 import * as THREE from "three";
@@ -56,16 +56,16 @@ function fbm(x:number,y:number,z:number, oct=3): number {
 const HOLE_DIR = norm([-0.78, 0.08, -0.62]);
 const TREE_DIR = norm([0.48, 0.12, 0.86]);
 const LAKE_DIR = norm([0.2, -0.6, -0.4]);
-const CAVE_DIR = norm([-0.72, -0.10, -0.68]);
+const CAVE_DIR = norm([-0.85, -0.15, -0.55]);
 
 /* ═══════ TERRENO ═══════ */
 function terrainHeight(nx:number, ny:number, nz:number): number {
   const dir:[number,number,number]=[nx,ny,nz];
-  // Montanhas pequenas e médias (Ambientação)
+  // Montanhas base e pequenos picos
   const hills = (fbm(nx*2.5, ny*2.5, nz*2.5, 4)-0.3)*8;
   const smallPeaks = Math.pow(Math.max(0, fbm(nx*5, ny*5, nz*5, 2)-0.4), 2)*15;
   
-  // Cratera
+  // Cratera profunda
   const dH=dot3(dir,HOLE_DIR);
   let crater=0;
   if(dH>0.96) crater=-14;
@@ -83,42 +83,49 @@ function terrainHeight(nx:number, ny:number, nz:number): number {
 function getVoxelData(x:number, y:number, z:number, weather: WeatherType, progress: number): THREE.Color | null {
   const dist=Math.sqrt(x*x+y*y+z*z);
   const nx=x/dist, ny=y/dist, nz=z/dist;
-  
-  // Subtração da Caverna
-  const startD=R-6, endD=R-20;
-  const sx=CAVE_DIR[0]*startD, sy=CAVE_DIR[1]*startD, sz=CAVE_DIR[2]*startD;
-  const ex=CAVE_DIR[0]*endD, ey=CAVE_DIR[1]*endD, ez=CAVE_DIR[2]*endD;
-  const dx=x-sx, dy=y-sy, dz=z-sz;
-  const lx=ex-sx, ly=ey-sy, lz=ez-sz;
-  const tCave=Math.max(0,Math.min(1,(dx*lx+dy*ly+dz*lz)/(lx*lx+ly*ly+lz*lz)));
-  const distToCave = Math.sqrt((x-(sx+tCave*lx))**2+(y-(sy+tCave*ly))**2+(z-(sz+tCave*lz))**2);
-  if(distToCave < 3.8) return null;
-
   const h = terrainHeight(nx,ny,nz);
   const surfDist = R + h;
+  
+  // Casca muito grossa: não tem erro, não tem furos. De 3 blocos de espessura.
   if(dist > surfDist + 0.3) return null;
-  if(dist < surfDist - 1.0) return null; // Casca de 1 bloco
+  if(dist < surfDist - 3.5) return null;
+
+  // Caverna: Subtração Cilíndrica Clara
+  const startD = R - 4; // Começa dentro da cratera
+  const endD = R - 20;  // Entra no planeta
+  const sx = CAVE_DIR[0]*startD, sy = CAVE_DIR[1]*startD, sz = CAVE_DIR[2]*startD;
+  const ex = CAVE_DIR[0]*endD, ey = CAVE_DIR[1]*endD, ez = CAVE_DIR[2]*endD;
+  const dx=x-sx, dy=y-sy, dz=z-sz;
+  const lx=ex-sx, ly=ey-sy, lz=ez-sz;
+  const tCave = Math.max(0, Math.min(1, (dx*lx+dy*ly+dz*lz)/(lx*lx+ly*ly+lz*lz)));
+  const distToCave = Math.sqrt((x-(sx+tCave*lx))**2+(y-(sy+tCave*ly))**2+(z-(sz+tCave*lz))**2);
+  // Se está dentro do túnel da caverna (raio 4), deletamos o bloco.
+  if(distToCave < 4.0) return null;
 
   const n = hash(x,y,z);
-  const clusterNoise = noise3d(x*0.15, y*0.15, z*0.15); // Ruído para manchas (clusters)
+  const clusterNoise = noise3d(x*0.15, y*0.15, z*0.15);
   
-  // Lógica de Transição por Manchas
-  // Se clusterNoise < progress, o bloco já "pegou" o novo clima
   const effectiveWeather = clusterNoise < progress ? weather : "sunny";
 
-  // Determinação da Cor baseada no Clima Efetivo
+  // Se for o interior da casca, é rocha escura (evita ver furos)
+  if (dist < surfDist - 1.5) {
+    return n > 0.5 ? C.stoneDeep : C.stone3;
+  }
+
+  // Clima de neve e tempestade afetam a superfície
   if(effectiveWeather === "snow" || effectiveWeather === "storm") {
     if(h > -2) return n > 0.4 ? C.snow1 : C.snow2;
   }
   
   // Água do Lago
   const dL = dot3([nx,ny,nz], LAKE_DIR);
-  if(dL > 0.93 && dist < R - 2) return C.water;
+  if(dL > 0.93 && dist < R - 2.5) return C.water;
 
-  if(h > 12) return n > 0.5 ? C.snow1 : C.snow2; // Picos nevados permanentes
-  if(h > 6) return n > 0.5 ? C.stone1 : C.stone2;
-  if(h < -12) return C.craterFloor;
+  if(h > 12) return n > 0.5 ? C.snow1 : C.snow2; // Picos
+  if(h > 6) return n > 0.5 ? C.stone1 : C.stone2; // Pedra
+  if(h < -12) return C.craterFloor; // Fundo da cratera
   
+  // Poças na chuva
   if(effectiveWeather === "rain" && h < 1) {
     const pNoise = hash(Math.round(x*0.2), 0, Math.round(z*0.2));
     if(pNoise > 0.8) return C.water;
@@ -135,8 +142,9 @@ type Voxel = { pos:[number,number,number]; colorSunny:THREE.Color; colorWeather:
 function generatePlanet(weather: WeatherType): Voxel[] {
   const data: Voxel[]=[];
   const occ=new Set<string>();
-  const maxR = R + 15, minR = R - 18;
+  const maxR = R + 22, minR = R - 22;
 
+  // 1. Geração da Superfície do Planeta
   for(let x=-maxR; x<=maxR; x++)
   for(let y=-maxR; y<=maxR; y++)
   for(let z=-maxR; z<=maxR; z++) {
@@ -152,54 +160,82 @@ function generatePlanet(weather: WeatherType): Voxel[] {
     }
   }
 
-  // Árvores Regulares (Pequenas)
+  // Helper para adicionar blocos de vegetação ignorando duplicatas
+  const addBlock = (x:number, y:number, z:number, c:THREE.Color) => {
+    const key = `${x},${y},${z}`;
+    if(!occ.has(key)) {
+      occ.add(key);
+      data.push({ pos:[x,y,z], colorSunny:c, colorWeather:c, cluster:-1 });
+    }
+  }
+
+  // 2. Árvores Regulares
   let smallTrees = 0;
-  for(let i=0; i<data.length && smallTrees < 150; i += 40) {
+  for(let i=0; i<data.length && smallTrees < 120; i += 50) {
     const v = data[i];
     if(v.colorSunny !== C.grass1 && v.colorSunny !== C.grass2) continue;
     const [px,py,pz] = v.pos;
-    if(hash(px,py,pz) < 0.97) continue;
+    if(hash(px,py,pz) < 0.96) continue;
     const dist = Math.sqrt(px*px+py*py+pz*pz);
     const ux=px/dist, uy=py/dist, uz=pz/dist;
     const h = 2 + Math.floor(hash(px,py,pz)*2);
-    for(let t=1; t<=h; t++) {
-      const tx=Math.round(px+ux*t), ty=Math.round(py+uy*t), tz=Math.round(pz+uz*t);
-      data.push({ pos:[tx,ty,tz], colorSunny:C.trunk, colorWeather:C.trunk, cluster:-1 });
-    }
+    
+    // Tronco
+    for(let t=1; t<=h; t++) addBlock(Math.round(px+ux*t), Math.round(py+uy*t), Math.round(pz+uz*t), C.trunk);
+    
+    // Copa Esférica sólida
     const cx=px+ux*(h+1), cy=py+uy*(h+1), cz=pz+uz*(h+1);
     for(let dx=-2; dx<=2; dx++) for(let dy=-2; dy<=2; dy++) for(let dz=-2; dz<=2; dz++) {
-      if(dx*dx+dy*dy+dz*dz < 5) {
-        data.push({ pos:[Math.round(cx+dx),Math.round(cy+dy),Math.round(cz+dz)], colorSunny:C.leaf2, colorWeather:C.leaf2, cluster:-1 });
-      }
+      if(dx*dx+dy*dy+dz*dz <= 5) addBlock(Math.round(cx+dx), Math.round(cy+dy), Math.round(cz+dz), C.leaf2);
     }
     smallTrees++;
   }
 
-  // Árvore Colossal (Ainda Maior)
-  const [tx,ty,tz]=TREE_DIR;
-  const hT=terrainHeight(tx,ty,tz);
-  const bx=tx*(R+hT), by=ty*(R+hT), bz=tz*(R+hT);
+  // 3. A Grande Árvore Colossal (Totalmente preenchida, sem furos)
+  const [tx,ty,tz] = TREE_DIR;
+  const hT = terrainHeight(tx,ty,tz);
+  const bx = tx*(R+hT), by = ty*(R+hT), bz = tz*(R+hT);
   const trunkH = 45;
+
+  // Tronco Principal (sólido)
   for(let i=0; i<trunkH; i++) {
     const cx=bx+tx*i, cy=by+ty*i, cz=bz+tz*i;
-    const r=Math.max(2, Math.round(6*(1-i/trunkH)+1));
+    const r=Math.max(2, Math.round(5*(1-i/trunkH)+1));
     for(let dx=-r; dx<=r; dx++) for(let dy=-r; dy<=r; dy++) for(let dz=-r; dz<=r; dz++) {
-      if(dx*dx+dy*dy+dz*dz <= r*r) {
-        data.push({ pos:[Math.round(cx+dx),Math.round(cy+dy),Math.round(cz+dz)], colorSunny:C.trunk, colorWeather:C.trunk, cluster:-1 });
-      }
+      if(dx*dx+dy*dy+dz*dz <= r*r) addBlock(Math.round(cx+dx), Math.round(cy+dy), Math.round(cz+dz), C.trunk);
     }
-    // Galhos Colossais
+
+    // Galhos Grandes
     if(i > 20 && i % 10 === 0) {
       const ang = i * 1.5;
-      for(let j=0; j<22; j++) {
-        const gx=Math.round(cx+Math.cos(ang)*j*2), gy=Math.round(cy+j*0.8), gz=Math.round(cz+Math.sin(ang)*j*2);
-        data.push({ pos:[gx,gy,gz], colorSunny:C.trunk, colorWeather:C.trunk, cluster:-1 });
-        if(j > 18) {
-          for(let lx=-7; lx<=7; lx++) for(let ly=-7; ly<=7; ly++) for(let lz=-7; lz<=7; lz++)
-            if(lx*lx+ly*ly+lz*lz < 45) data.push({ pos:[gx+lx,gy+ly,gz+lz], colorSunny:C.leaf1, colorWeather:C.leaf1, cluster:-1 });
+      const gxDir = Math.cos(ang), gyDir = 0.4, gzDir = Math.sin(ang);
+      
+      let lastGX = cx, lastGY = cy, lastGZ = cz;
+      // Cilindro contínuo para o galho
+      for(let j=0; j<24; j++) {
+        lastGX = cx + gxDir * j * 1.5;
+        lastGY = cy + gyDir * j * 1.5;
+        lastGZ = cz + gzDir * j * 1.5;
+        
+        // Galho sólido
+        for(let dx=-1; dx<=1; dx++) for(let dy=-1; dy<=1; dy++) for(let dz=-1; dz<=1; dz++) {
+          if(dx*dx+dy*dy+dz*dz <= 2) addBlock(Math.round(lastGX+dx), Math.round(lastGY+dy), Math.round(lastGZ+dz), C.trunk);
         }
       }
+
+      // Copa Esférica Massiva e SÓLIDA na ponta do galho
+      const crownR = 7;
+      for(let lx=-crownR; lx<=crownR; lx++) for(let ly=-crownR; ly<=crownR; ly++) for(let lz=-crownR; lz<=crownR; lz++) {
+        if(lx*lx+ly*ly+lz*lz <= crownR*crownR) addBlock(Math.round(lastGX+lx), Math.round(lastGY+ly), Math.round(lastGZ+lz), C.leaf1);
+      }
     }
+  }
+
+  // Copa Central Gigante no topo da árvore
+  const topX = bx+tx*(trunkH+2), topY = by+ty*(trunkH+2), topZ = bz+tz*(trunkH+2);
+  const topR = 10;
+  for(let lx=-topR; lx<=topR; lx++) for(let ly=-topR; ly<=topR; ly++) for(let lz=-topR; lz<=topR; lz++) {
+    if(lx*lx+ly*ly+lz*lz <= topR*topR) addBlock(Math.round(topX+lx), Math.round(topY+ly), Math.round(topZ+lz), C.leafBright);
   }
 
   return data;
@@ -209,78 +245,53 @@ function generatePlanet(weather: WeatherType): Voxel[] {
 function PlanetBody() {
   const { weather } = useGameState();
   const meshRef = useRef<THREE.InstancedMesh>(null!);
-
-  // Gerar uma vez só, sem depender de weather
+  
+  // O Planeta é gerado UMA VEZ
   const voxels = useMemo(() => generatePlanet("sunny"), []);
+  
+  const transitionStart = useRef(Date.now());
+  const prevWeather = useRef<WeatherType>("sunny");
 
-  // Controle de transição
-  const lastWeather = useRef<WeatherType>("sunny");
-  const transitionQueue = useRef<number[]>([]); // índices dos blocos que faltam mudar
-  const transitionDone = useRef(true);
+  useEffect(() => {
+    transitionStart.current = Date.now();
+  }, [weather]);
 
-  // Posições (uma vez)
+  useFrame(() => {
+    if(!meshRef.current) return;
+    const elapsed = (Date.now() - transitionStart.current) / 1000;
+    const progress = Math.min(elapsed / 15, 1); 
+
+    for(let i=0; i<voxels.length; i++) {
+      const v = voxels[i];
+      if(v.cluster === -1) continue; 
+      const normalizedCluster = (v.cluster + 1) / 2;
+      const color = normalizedCluster < progress ? v.colorWeather : v.colorSunny;
+      meshRef.current.setColorAt(i, color);
+    }
+    meshRef.current.instanceColor!.needsUpdate = true;
+  });
+
   useLayoutEffect(() => {
     const dummy = new THREE.Object3D();
-    for (let i = 0; i < voxels.length; i++) {
-      dummy.position.set(...voxels[i].pos);
+    voxels.forEach((v, i) => {
+      dummy.position.set(...v.pos);
       dummy.updateMatrix();
       meshRef.current.setMatrixAt(i, dummy.matrix);
-      meshRef.current.setColorAt(i, voxels[i].colorSunny);
-    }
+      meshRef.current.setColorAt(i, v.colorSunny);
+    });
     meshRef.current.instanceMatrix.needsUpdate = true;
     meshRef.current.instanceColor!.needsUpdate = true;
   }, [voxels]);
 
-  useFrame(() => {
-    if (!meshRef.current) return;
-
-    // Detecta troca de clima → cria fila de transição
-    if (lastWeather.current !== weather) {
-      lastWeather.current = weather;
-
-      // Pré-computa as cores alvo para este clima
-      for (let i = 0; i < voxels.length; i++) {
-        const v = voxels[i];
-        if (v.cluster === -1) continue; // árvores não mudam
-        const [x, y, z] = v.pos;
-        v.colorWeather = getVoxelData(x, y, z, weather, 1.1) || v.colorSunny;
-      }
-
-      // Ordena os índices pelo valor de cluster (manchas crescentes)
-      const indices: { idx: number; cluster: number }[] = [];
-      for (let i = 0; i < voxels.length; i++) {
-        if (voxels[i].cluster !== -1) indices.push({ idx: i, cluster: voxels[i].cluster });
-      }
-      indices.sort((a, b) => a.cluster - b.cluster);
-      transitionQueue.current = indices.map(i => i.idx);
-      transitionDone.current = false;
-    }
-
-    // Processa lote: ~300 blocos por frame = ~15s para 55k blocos a 60fps
-    if (!transitionDone.current) {
-      const queue = transitionQueue.current;
-      const batchSize = Math.min(300, queue.length);
-      if (batchSize === 0) {
-        transitionDone.current = true;
-        return;
-      }
-      const batch = queue.splice(0, batchSize);
-      for (const idx of batch) {
-        meshRef.current.setColorAt(idx, voxels[idx].colorWeather);
-      }
-      meshRef.current.instanceColor!.needsUpdate = true;
-    }
-  });
-
   return (
     <instancedMesh ref={meshRef} args={[undefined, undefined, voxels.length]} frustumCulled={false}>
-      <boxGeometry args={[1, 1, 1]} />
+      <boxGeometry args={[1.05, 1.05, 1.05]} />
       <meshStandardMaterial roughness={0.8} flatShading />
     </instancedMesh>
   );
 }
 
-/* ═══════ ROTAÇÃO ═══════ */
+/* ═══════ ROTAÇÃO E ATMOSFERA ═══════ */
 function Rotator({children}:{children:React.ReactNode}) {
   const ref = useRef<THREE.Group>(null!);
   const {weather} = useGameState();
@@ -288,40 +299,19 @@ function Rotator({children}:{children:React.ReactNode}) {
   return <group ref={ref}>{children}</group>;
 }
 
-/* ═══════ ATMOSFERA ═══════ */
 function Atmosphere() {
   const { hour, weather } = useGameState();
   const { scene } = useThree();
-
-  // Inicializa background no mount
-  useLayoutEffect(() => {
-    scene.background = new THREE.Color("#070e2b");
-  }, [scene]);
-
   useFrame((_,delta) => {
-    if (!scene.background) scene.background = new THREE.Color("#070e2b");
     let bg = "#070e2b";
     if(weather==="storm") bg="#0a0a0f";
     else if(weather==="fog") bg="#1e293b";
-    else if(weather==="rain") bg="#0d1025";
-    else if(weather==="snow") bg="#101828";
-    else if(hour<5) bg="#020408";
-    else if(hour<7) bg="#1a0e3a";
-    else if(hour<8) bg="#1e1b4b";
-    else if(hour<11) bg="#0c1445";
-    else if(hour<16) bg="#070e2b";
-    else if(hour<18) bg="#1a1040";
-    else if(hour<20) bg="#12082a";
-    else bg="#020408";
-
-    (scene.background as THREE.Color).lerp(new THREE.Color(bg), delta*2);
-    
-    if(weather==="fog") scene.fog = new THREE.Fog("#334155", R*0.6, R*3);
-    else if(weather==="storm") scene.fog = new THREE.Fog("#0f172a", R, R*3.5);
-    else if(weather==="rain") scene.fog = new THREE.Fog("#1a2332", R*2, R*5);
+    else if(hour<6 || hour>20) bg="#020408";
+    (scene.background as THREE.Color).lerp(new THREE.Color(bg), delta);
+    if(weather==="fog") scene.fog = new THREE.Fog(bg, R, R*3);
     else scene.fog = null;
   });
-  return <color attach="background" args={["#070e2b"]} />;
+  return null;
 }
 
 function Sun() {
