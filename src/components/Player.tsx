@@ -7,7 +7,7 @@ import { useGameState } from "@/context/GameContext";
 
 const R = 40;
 
-/* ═══════ TERRENO (cópia exata do VoxelPlanet) ═══════ */
+/* ═══════ MATH & NOISE ═══════ */
 function hash(x: number, y: number, z: number): number {
   let h = (x * 374761393 + y * 668265263 + z * 1274126177) | 0;
   h = ((h ^ (h >> 13)) * 1103515245) | 0;
@@ -27,12 +27,14 @@ function fbm(x: number, y: number, z: number, oct = 3): number {
   for (let i = 0; i < oct; i++) { v += noise3d(x * f, y * f, z * f) * a; a *= 0.5; f *= 2.1; }
   return v;
 }
-function normV(v: [number, number, number]): [number, number, number] {
-  const d = Math.sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]); return [v[0] / d, v[1] / d, v[2] / d];
-}
 function dot3(a: [number, number, number], b: [number, number, number]) {
   return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
 }
+function normV(v: [number, number, number]): [number, number, number] {
+  const d = Math.sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]); return [v[0] / d, v[1] / d, v[2] / d];
+}
+
+/* ═══════ LANDMARKS ═══════ */
 const HOLE_DIR = normV([-0.78, 0.08, -0.62]);
 const LAKE_DIR = normV([0.2, -0.6, -0.4]);
 const MTN_1 = normV([0.75, 0.55, -0.30]);
@@ -64,23 +66,21 @@ function getSurfaceDist(pos: THREE.Vector3): number {
   return R + terrainHeight(pos.x / d, pos.y / d, pos.z / d);
 }
 
-/* ═══════ INPUT ═══════ */
 const keys: Record<string, boolean> = {};
 
 export default function Player() {
   const { cameraView, entered, weatherPanelOpen, diaryOpen } = useGameState();
   const { camera } = useThree();
 
-  // Estado do personagem
-  const pos = useRef(new THREE.Vector3(0, 0, R + 3));
-  const yaw = useRef(0); // Ângulo horizontal (giro do corpo em torno do eixo "up")
+  const playerPos = useRef(new THREE.Vector3(0, R + 10, 0));
+  const smoothedUp = useRef(new THREE.Vector3(0, 1, 0));
+  const smoothedHeight = useRef(R + 10);
+  const yaw = useRef(0);
   const meshRef = useRef<THREE.Group>(null!);
 
-  // Configurações estilo Minecraft
-  const MOVE_SPEED = 5;
-  const TURN_SPEED = 2.5; // rad/s
-  const PLAYER_HEIGHT = 0.3; // centro do corpo acima do chão
-  const EYE_HEIGHT = 0.7; // olhos acima do chão
+  const MOVE_SPEED = 6;
+  const TURN_SPEED = 3.0;
+  const SMOOTH_FACTOR = 0.15; // Amortecimento da câmera e orientação
 
   useEffect(() => {
     const down = (e: KeyboardEvent) => { keys[e.key.toLowerCase()] = true; };
@@ -90,126 +90,93 @@ export default function Player() {
     return () => { window.removeEventListener("keydown", down); window.removeEventListener("keyup", up); };
   }, []);
 
-  useFrame((_, delta) => {
+  useFrame((state, delta) => {
     if (!entered || weatherPanelOpen || diaryOpen || cameraView === "orbit") return;
 
-    const p = pos.current;
-    const up = p.clone().normalize();
+    const p = playerPos.current;
+    const currentUp = p.clone().normalize();
 
-    // ─── FORWARD e RIGHT no espaço tangente da esfera ───
-    // Cria um sistema de coordenadas local na superfície do planeta:
-    // - "up" aponta pra fora do centro
-    // - "forward" é uma direção tangente baseada no yaw
-    // - "right" é perpendicular a ambos
+    // 1. Suavização da Orientação (smoothedUp)
+    // Isso evita que a câmera balance violentamente em degraus de voxels
+    smoothedUp.current.lerp(currentUp, 0.1);
+    const up = smoothedUp.current.clone().normalize();
 
-    // Vetor de referência para construir o frame tangente
-    const worldUp = new THREE.Vector3(0, 1, 0);
-    let tangentRef = new THREE.Vector3().crossVectors(up, worldUp);
-    if (tangentRef.lengthSq() < 0.001) {
-      tangentRef = new THREE.Vector3().crossVectors(up, new THREE.Vector3(1, 0, 0));
-    }
-    tangentRef.normalize();
-    const tangentRef2 = new THREE.Vector3().crossVectors(up, tangentRef).normalize();
+    // 2. Sistema de coordenadas tangente
+    const worldRef = Math.abs(up.y) > 0.9 ? new THREE.Vector3(1, 0, 0) : new THREE.Vector3(0, 1, 0);
+    const tangentX = new THREE.Vector3().crossVectors(up, worldRef).normalize();
+    const tangentZ = new THREE.Vector3().crossVectors(up, tangentX).normalize();
 
-    // Forward e right baseados no yaw (giro do corpo)
-    const forward = tangentRef.clone().multiplyScalar(Math.cos(yaw.current))
-      .add(tangentRef2.clone().multiplyScalar(Math.sin(yaw.current))).normalize();
+    // 3. Forward e Right baseados no Yaw do personagem
+    const forward = tangentX.clone().multiplyScalar(Math.cos(yaw.current))
+      .add(tangentZ.clone().multiplyScalar(Math.sin(yaw.current))).normalize();
     const right = new THREE.Vector3().crossVectors(up, forward).normalize();
 
-    // ─── INPUT (Estilo Minecraft) ───
-    // A/D GIRAM o personagem, W/S andam pra frente/trás
+    // 4. Input e Movimento
     if (keys["a"] || keys["arrowleft"]) yaw.current += TURN_SPEED * delta;
     if (keys["d"] || keys["arrowright"]) yaw.current -= TURN_SPEED * delta;
 
-    let moveAmount = 0;
-    let strafeAmount = 0;
-    if (keys["w"] || keys["arrowup"]) moveAmount += 1;
-    if (keys["s"] || keys["arrowdown"]) moveAmount -= 1;
-
-    if (moveAmount !== 0 || strafeAmount !== 0) {
-      const moveDir = forward.clone().multiplyScalar(moveAmount)
-        .add(right.clone().multiplyScalar(strafeAmount)).normalize();
-
-      const candidatePos = p.clone().add(moveDir.clone().multiplyScalar(MOVE_SPEED * delta));
-
-      // ─── COLISÃO COM PAREDES ───
-      const curSurf = getSurfaceDist(p);
-      const candSurf = getSurfaceDist(candidatePos);
-      const heightDiff = candSurf - curSurf;
-
-      // Permite subir degraus de até 1.5 blocos, bloqueia paredes mais altas
-      if (heightDiff < 1.5) {
+    let moveDir = new THREE.Vector3(0, 0, 0);
+    if (keys["w"] || keys["arrowup"]) moveDir.add(forward);
+    if (keys["s"] || keys["arrowdown"]) moveDir.sub(forward);
+    
+    if (moveDir.lengthSq() > 0) {
+      moveDir.normalize();
+      const candidatePos = p.clone().add(moveDir.multiplyScalar(MOVE_SPEED * delta));
+      
+      // Colisão lateral simples
+      const curS = getSurfaceDist(p);
+      const candS = getSurfaceDist(candidatePos);
+      if (candS - curS < 1.5) {
         p.copy(candidatePos);
       }
     }
 
-    // ─── GRUDAR NO CHÃO (snap direto, sem flutuação) ───
-    const surfDist = getSurfaceDist(p);
-    p.normalize().multiplyScalar(surfDist + PLAYER_HEIGHT);
+    // 5. Suavização de Altura (smoothedHeight)
+    // Impede a câmera de "pular" em cada bloco
+    const rawSurfDist = getSurfaceDist(p);
+    const targetH = rawSurfDist + 0.2; // 0.2 acima do chão
+    smoothedHeight.current = THREE.MathUtils.lerp(smoothedHeight.current, targetH, 0.15);
+    p.normalize().multiplyScalar(smoothedHeight.current);
 
-    // ─── ATUALIZA MESH ───
+    // 6. Atualização do Modelo
     if (meshRef.current) {
       meshRef.current.position.copy(p);
       meshRef.current.up.copy(up);
-      const lookTarget = p.clone().add(forward);
-      meshRef.current.lookAt(lookTarget);
+      meshRef.current.lookAt(p.clone().add(forward));
     }
 
-    // ─── CÂMERA ───
-    // Recalcula up e forward APÓS snap do chão
-    const upFinal = p.clone().normalize();
-    const fwdFinal = tangentRef.clone().multiplyScalar(Math.cos(yaw.current))
-      .add(tangentRef2.clone().multiplyScalar(Math.sin(yaw.current))).normalize();
-
+    // 7. Câmera Adaptativa
     if (cameraView === "third") {
-      // ─── 3ª PESSOA (Minecraft style) ───
-      // Câmera fica ATRÁS do personagem, olhando PRA ELE
-      const camBehind = fwdFinal.clone().multiplyScalar(-6);
-      const camAbove = upFinal.clone().multiplyScalar(3);
-      let idealCamPos = p.clone().add(camBehind).add(camAbove);
-
-      // Colisão da câmera com o terreno: se ia enterrar, sobe
-      const camSurfDist = getSurfaceDist(idealCamPos);
-      const camMinDist = camSurfDist + 2;
-      if (idealCamPos.length() < camMinDist) {
-        idealCamPos.normalize().multiplyScalar(camMinDist);
-      }
-
-      camera.position.lerp(idealCamPos, Math.min(delta * 8, 1));
-
-      // OLHA PRO PERSONAGEM (como Minecraft 3ª pessoa)
-      const lookAt = p.clone().add(upFinal.clone().multiplyScalar(0.5));
-      camera.up.copy(upFinal);
-      camera.lookAt(lookAt);
+      // Braço da câmera (fixed behind the player)
+      const camOffset = forward.clone().multiplyScalar(-6).add(up.clone().multiplyScalar(3.5));
+      const targetCamPos = p.clone().add(camOffset);
+      
+      // Suavização da câmera (Inércia)
+      camera.position.lerp(targetCamPos, 0.1);
+      camera.up.lerp(up, 0.1);
+      
+      // Foca um pouco à frente do personagem para melhor visibilidade
+      const focus = p.clone().add(forward.clone().multiplyScalar(2));
+      camera.lookAt(focus);
 
     } else if (cameraView === "first") {
-      // ─── 1ª PESSOA (Minecraft style) ───
-      // Câmera nos olhos, olha pra onde o personagem aponta
-      const eyePos = p.clone().add(upFinal.clone().multiplyScalar(EYE_HEIGHT));
+      const eyePos = p.clone().add(up.clone().multiplyScalar(0.6));
       camera.position.copy(eyePos);
-
-      // Olha reto pra frente na direção que o personagem está virado
-      const lookTarget = eyePos.clone().add(fwdFinal.clone().multiplyScalar(20));
-      camera.up.copy(upFinal);
-      camera.lookAt(lookTarget);
+      camera.up.copy(up);
+      camera.lookAt(eyePos.clone().add(forward.clone().multiplyScalar(10)));
     }
   });
 
-  const visible = cameraView !== "first";
-
   return (
-    <group ref={meshRef} visible={visible} scale={0.4}>
-      {/* Corpo */}
+    <group ref={meshRef} visible={cameraView !== "first"} scale={0.4}>
       <mesh position={[0, 0.8, 0]}>
         <boxGeometry args={[1, 1.4, 0.8]} />
         <meshStandardMaterial color="#3b82f6" flatShading />
       </mesh>
-      {/* Cabeça */}
       <mesh position={[0, 1.8, 0]}>
         <boxGeometry args={[0.8, 0.8, 0.8]} />
         <meshStandardMaterial color="#fcd34d" flatShading />
       </mesh>
-      {/* Pernas */}
       <mesh position={[-0.25, 0, 0]}>
         <boxGeometry args={[0.4, 0.8, 0.5]} />
         <meshStandardMaterial color="#1e3a5f" flatShading />
@@ -218,7 +185,6 @@ export default function Player() {
         <boxGeometry args={[0.4, 0.8, 0.5]} />
         <meshStandardMaterial color="#1e3a5f" flatShading />
       </mesh>
-      {/* Braços */}
       <mesh position={[-0.7, 0.9, 0]}>
         <boxGeometry args={[0.3, 1.0, 0.4]} />
         <meshStandardMaterial color="#3b82f6" flatShading />
