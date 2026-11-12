@@ -131,12 +131,20 @@ export default function Player() {
       }
     }
 
-    // 5. Suavização de Altura (smoothedHeight)
-    // Impede a câmera de "pular" em cada bloco
+    // 5. Altura — NUNCA enterrar no chão
     const rawSurfDist = getSurfaceDist(p);
-    const targetH = rawSurfDist + 0.2; // 0.2 acima do chão
-    smoothedHeight.current = THREE.MathUtils.lerp(smoothedHeight.current, targetH, 0.15);
-    p.normalize().multiplyScalar(smoothedHeight.current);
+    const targetH = rawSurfDist + 0.5;
+    const currentH = p.length();
+
+    if (currentH < targetH) {
+      // Subindo ou enterrado: snap INSTANTÂNEO pra cima (resolve imagem 1)
+      p.normalize().multiplyScalar(targetH);
+    } else {
+      // Descendo: suave pra não pular
+      const newH = THREE.MathUtils.lerp(currentH, targetH, 0.3);
+      p.normalize().multiplyScalar(newH);
+    }
+    smoothedHeight.current = p.length();
 
     // 6. Atualização do Modelo
     if (meshRef.current) {
@@ -145,19 +153,28 @@ export default function Player() {
       meshRef.current.lookAt(p.clone().add(forward));
     }
 
-    // 7. Câmera Adaptativa
+    // 7. Câmera
     if (cameraView === "third") {
-      // Braço da câmera (fixed behind the player)
-      const camOffset = forward.clone().multiplyScalar(-6).add(up.clone().multiplyScalar(3.5));
-      const targetCamPos = p.clone().add(camOffset);
-      
-      // Suavização da câmera (Inércia)
-      camera.position.lerp(targetCamPos, 0.1);
-      camera.up.lerp(up, 0.1);
-      
-      // Foca um pouco à frente do personagem para melhor visibilidade
-      const focus = p.clone().add(forward.clone().multiplyScalar(2));
-      camera.lookAt(focus);
+      // Posição ideal: atrás e acima
+      const camBehind = forward.clone().multiplyScalar(-5);
+      const camUp = up.clone().multiplyScalar(4);
+      let idealCamPos = p.clone().add(camBehind).add(camUp);
+
+      // Garante que câmera está ACIMA do terreno onde ela fica
+      const camSurf = getSurfaceDist(idealCamPos);
+      const camMinH = camSurf + 2;
+      if (idealCamPos.length() < camMinH) {
+        idealCamPos.normalize().multiplyScalar(camMinH);
+      }
+
+      // Suavização
+      camera.position.lerp(idealCamPos, 0.12);
+
+      // SEMPRE olha pro personagem (não à frente dele)
+      // Isso resolve a imagem 2: na montanha, olha pro boneco, não pro chão
+      const lookTarget = p.clone().add(up.clone().multiplyScalar(0.8));
+      camera.up.lerp(up, 0.15);
+      camera.lookAt(lookTarget);
 
     } else if (cameraView === "first") {
       const eyePos = p.clone().add(up.clone().multiplyScalar(0.6));
