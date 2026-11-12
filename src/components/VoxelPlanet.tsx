@@ -212,13 +212,14 @@ function generatePlanet(): Voxel[] {
     data.push({ pos:[rx,ry,rz], colorSunny:col, colorWeather:col, cluster:-1, isTree:true, h:99, n:0.5, dist:Math.sqrt(rx*rx+ry*ry+rz*rz) });
   };
 
-  // Árvores pequenas, médias e arbustos espalhados pela grama
+  // Árvores pequenas, médias e arbustos frutíferos espalhados
   let treeCount = 0;
   let bushCount = 0;
-  const fruitColor = new THREE.Color("#ef4444"); // frutas vermelhas
-  const berryColor = new THREE.Color("#a855f7"); // frutas roxas
+  const fruitColor = new THREE.Color("#ef4444");
+  const berryColor = new THREE.Color("#a855f7");
+  const flowerYellow = new THREE.Color("#facc15");
 
-  for (let i = 0; i < data.length; i += 25) {
+  for (let i = 0; i < data.length; i += 20) {
     const v = data[i];
     const isGrass = v.colorSunny === C.grass1 || v.colorSunny === C.grass2 || v.colorSunny === C.grass3;
     if (!isGrass) continue;
@@ -227,43 +228,55 @@ function generatePlanet(): Voxel[] {
     const dist = Math.sqrt(px*px+py*py+pz*pz);
     const ux = px / dist, uy = py / dist, uz = pz / dist;
 
-    if (n > 0.96 && treeCount < 200) {
-      // Árvore pequena ou média (altura varia de 2 a 5)
+    if (n > 0.965 && treeCount < 250) {
+      // Árvore pequena/média com tronco visível e copa densa
       const th = 2 + Math.floor(n * 4);
-      const crownR = th > 3 ? 3 : 2; // copa maior para árvores mais altas
+      const crownR = th > 3 ? 3 : 2;
 
-      for (let t = 1; t <= th; t++) addTree(px+ux*t, py+uy*t, pz+uz*t, C.trunk);
+      // Tronco (mais grosso na base)
+      for (let t = 1; t <= th; t++) {
+        addTree(px+ux*t, py+uy*t, pz+uz*t, C.trunk);
+        if (t <= 2) { // base do tronco mais grossa
+          addTree(px+ux*t+1, py+uy*t, pz+uz*t, C.trunkDark);
+          addTree(px+ux*t, py+uy*t+1, pz+uz*t, C.trunkDark);
+        }
+      }
 
+      // Copa esférica densa
       const cx = px + ux * (th + 1), cy = py + uy * (th + 1), cz = pz + uz * (th + 1);
       for (let dx=-crownR; dx<=crownR; dx++)
       for (let dy=-crownR; dy<=crownR; dy++)
       for (let dz=-crownR; dz<=crownR; dz++) {
-        if (dx*dx+dy*dy+dz*dz <= crownR*crownR && hash(dx+px,dy+py,dz+pz) > 0.2) {
+        if (dx*dx+dy*dy+dz*dz <= crownR*crownR && hash(dx+px,dy+py,dz+pz) > 0.15) {
           const ln = hash(dx*3+px, dy*3+py, dz*3+pz);
-          addTree(cx+dx, cy+dy, cz+dz, ln > 0.5 ? C.leaf1 : C.leaf2);
+          addTree(cx+dx, cy+dy, cz+dz, ln > 0.6 ? C.leafBright : ln > 0.3 ? C.leaf1 : C.leaf2);
         }
       }
       treeCount++;
 
-    } else if (n > 0.93 && n <= 0.96 && bushCount < 120) {
-      // Arbusto frutífero (baixo e largo, com frutas coloridas)
-      const cx = px + ux * 1.5, cy = py + uy * 1.5, cz = pz + uz * 1.5;
+    } else if (n > 0.94 && n <= 0.965 && bushCount < 180) {
+      // Arbusto frutífero detalhado: tronquinho + copa baixa com frutas
+      // Tronco curto (2 blocos)
+      addTree(px+ux, py+uy, pz+uz, C.trunkDark);
+      addTree(px+ux*2, py+uy*2, pz+uz*2, C.trunk);
+
+      // Copa do arbusto (3 de raio, achatada)
+      const cx = px + ux * 2.5, cy = py + uy * 2.5, cz = pz + uz * 2.5;
       const bushR = 2;
       for (let dx=-bushR; dx<=bushR; dx++)
       for (let dy=-bushR; dy<=bushR; dy++)
       for (let dz=-bushR; dz<=bushR; dz++) {
         const dd = dx*dx+dy*dy+dz*dz;
-        if (dd <= bushR*bushR + 1 && hash(dx+px*2,dy+py*2,dz+pz*2) > 0.25) {
+        if (dd <= bushR*bushR + 1 && hash(dx+px*2,dy+py*2,dz+pz*2) > 0.2) {
           const fn = hash(dx+px, dy+py*3, dz+pz);
           let col: THREE.Color;
-          if (fn > 0.88) col = fruitColor;       // fruta vermelha
-          else if (fn > 0.82) col = berryColor;   // fruta roxa
+          if (fn > 0.9) col = fruitColor;        // fruta vermelha
+          else if (fn > 0.84) col = berryColor;   // fruta roxa
+          else if (fn > 0.8) col = flowerYellow;   // florzinha amarela
           else col = fn > 0.5 ? C.leaf1 : C.leafBright;
           addTree(cx+dx, cy+dy, cz+dz, col);
         }
       }
-      // Tronquinho curto
-      addTree(px+ux, py+uy, pz+uz, C.trunkDark);
       bushCount++;
     }
   }

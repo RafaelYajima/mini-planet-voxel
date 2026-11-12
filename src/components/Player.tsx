@@ -65,9 +65,9 @@ export default function Player() {
   const raycaster = useRef(new THREE.Raycaster());
 
   // Configurações do Personagem
-  const moveSpeed = 16;
-  const turnSpeed = 10;
-  const playerHeight = 2.5;
+  const moveSpeed = 6;       // bem mais lento = planeta parece gigante
+  const turnSpeed = 8;
+  const playerHeight = 1.0;  // mais perto do chão
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => { keys[e.key.toLowerCase()] = true; };
@@ -108,7 +108,7 @@ export default function Player() {
       camForward.copy(playerDir.current);
     }
     
-    const camRight = new THREE.Vector3().crossVectors(up, camForward).normalize();
+    const camRight = new THREE.Vector3().crossVectors(camForward, up).normalize();
 
     if (moveF !== 0 || moveR !== 0) {
       // Vetor de input relativo à câmera
@@ -181,18 +181,23 @@ export default function Player() {
 
     // ─── CÂMERA ───
     if (cameraView === "third") {
-      // 3ª pessoa: atrás e acima do personagem
-      // Usa o playerDir para a câmera seguir as costas do personagem
-      const camOffset = playerDir.current.clone().multiplyScalar(-12).add(up.clone().multiplyScalar(6));
-      const targetCamPos = pos.clone().add(camOffset);
+      // 3ª pessoa: mais baixa e mais próxima, olhando levemente pra baixo
+      const behind = playerDir.current.clone().multiplyScalar(-6);  // perto das costas
+      const above = up.clone().multiplyScalar(3);                    // pouco acima
+      const targetCamPos = pos.clone().add(behind).add(above);
       camera.position.lerp(targetCamPos, delta * 6);
-      camera.lookAt(pos);
+      // Olha um pouco à frente e abaixo do personagem (não no centro dele)
+      const lookTarget = pos.clone().add(playerDir.current.clone().multiplyScalar(3));
+      camera.lookAt(lookTarget);
       camera.up.copy(up);
     } else if (cameraView === "first") {
-      // 1ª pessoa: nos olhos do personagem
-      const eyeOffset = up.clone().multiplyScalar(1.5);
+      // 1ª pessoa: nos olhos, olhando levemente pra baixo pra ver o chão
+      const eyeOffset = up.clone().multiplyScalar(0.8);
       camera.position.copy(pos.clone().add(eyeOffset));
-      const lookPoint = pos.clone().add(playerDir.current.clone().multiplyScalar(10)).add(eyeOffset);
+      // Olha pra frente mas um pouco pra baixo
+      const lookDir = playerDir.current.clone().multiplyScalar(8);
+      const lookDown = up.clone().multiplyScalar(-0.5);
+      const lookPoint = pos.clone().add(lookDir).add(lookDown).add(eyeOffset);
       camera.lookAt(lookPoint);
       camera.up.copy(up);
     }
@@ -201,7 +206,7 @@ export default function Player() {
   const showMesh = cameraView !== "first";
 
   return (
-    <group ref={meshRef} visible={showMesh}>
+    <group ref={meshRef} visible={showMesh} scale={0.4}>
       {/* Corpo */}
       <mesh position={[0, 0.8, 0]}>
         <boxGeometry args={[1, 1.4, 0.8]} />
