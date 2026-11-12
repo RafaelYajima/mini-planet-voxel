@@ -118,33 +118,45 @@ export default function Player() {
     const camRight = new THREE.Vector3().crossVectors(camForward, up).normalize();
 
     if (moveF !== 0 || moveR !== 0) {
-      // Vetor de input relativo à câmera
       const inputDir = camForward.clone().multiplyScalar(moveF).add(camRight.clone().multiplyScalar(moveR)).normalize();
       
-      // Move a posição
-      pos.add(inputDir.clone().multiplyScalar(moveSpeed * delta));
+      // Posição candidata (onde o personagem QUER ir)
+      const candidatePos = pos.clone().add(inputDir.clone().multiplyScalar(moveSpeed * delta));
       
-      // Atualiza a direção alvo para onde o personagem quer olhar
+      // Checa a altura do terreno na posição candidata
+      const candDist = candidatePos.length();
+      const cnx = candidatePos.x / candDist, cny = candidatePos.y / candDist, cnz = candidatePos.z / candDist;
+      const candSurfaceH = R + terrainHeight(cnx, cny, cnz);
+      
+      // Checa a altura do terreno na posição atual
+      const curDist = pos.length();
+      const curNx = pos.x / curDist, curNy = pos.y / curDist, curNz = pos.z / curDist;
+      const curSurfaceH = R + terrainHeight(curNx, curNy, curNz);
+      
+      // Diferença de altura entre destino e posição atual
+      const heightDiff = candSurfaceH - curSurfaceH;
+      
+      // Se a subida for muito íngreme (parede), bloqueia o movimento
+      // Permite subir rampas de até ~2 blocos de degrau
+      if (heightDiff < 2.5) {
+        pos.copy(candidatePos);
+      }
+      // Se bloqueou, o personagem simplesmente não se move (bate na parede)
+      
       targetDir.current.copy(inputDir);
     }
 
-    // Rotação suave do modelo em direção ao targetDir
+    // Rotação suave
     playerDir.current.lerp(targetDir.current, delta * turnSpeed).normalize();
 
-    // ─── PISADA NO CHÃO ───
-    // Usa a fórmula do terreno direto (mais confiável que raycast para voxels esféricos)
+    // ─── PISADA NO CHÃO (instantâneo, sem flutuar) ───
     const pDist = pos.length();
     const pnx = pos.x / pDist, pny = pos.y / pDist, pnz = pos.z / pDist;
     const surfaceH = R + terrainHeight(pnx, pny, pnz);
     const targetDist = surfaceH + playerHeight;
     
-    // Interpola rápido pra cima (subir montanha), instantâneo pra baixo (não flutuar)
-    const currentDist = pos.length();
-    const newDist = currentDist > targetDist
-      ? THREE.MathUtils.lerp(currentDist, targetDist, Math.min(delta * 25, 1))  // descendo: rápido
-      : THREE.MathUtils.lerp(currentDist, targetDist, Math.min(delta * 20, 1)); // subindo: rápido
-    
-    pos.normalize().multiplyScalar(newDist);
+    // Snap instantâneo pro chão — sem lerp lento que causa flutuação
+    pos.normalize().multiplyScalar(targetDist);
 
     // ─── ATUALIZA MESH ───
     if (meshRef.current) {
@@ -162,32 +174,50 @@ export default function Player() {
     fwd.sub(up.clone().multiplyScalar(fwd.dot(up))).normalize();
 
     if (cameraView === "third") {
-      // 3ª pessoa: câmera fica atrás+acima, olha pra frente+abaixo do personagem
-      // Offset calculado no espaço local do planeta (up = radial)
-      const behind = fwd.clone().multiplyScalar(-4);      // 4 blocos atrás
-      const above = up.clone().multiplyScalar(2.5);        // 2.5 blocos acima
-      const idealPos = pos.clone().add(behind).add(above);
+      // Posição ideal da câmera: atrás e acima do personagem
+      const behind = fwd.clone().multiplyScalar(-5);
+      const above = up.clone().multiplyScalar(3);
+      const idealCamPos = pos.clone().add(behind).add(above);
+      
+      // Checa a altura do terreno na posição da câmera
+      // Se a câmera ficar enterrada no chão, sobe ela
+      const camPosDist = idealCamPos.length();
+      const camNx = idealCamPos.x / camPosDist;
+      const camNy = idealCamPos.y / camPosDist;
+      const camNz = idealCamPos.z / camPosDist;
+      const camTerrainH = R + terrainHeight(camNx, camNy, camNz);
+      const minCamDist = camTerrainH + 1.5; // câmera nunca abaixo de 1.5 bloco do chão
+      
+      if (camPosDist < minCamDist) {
+        // Câmera ia enterrar no chão — sobe ela
+        idealCamPos.normalize().multiplyScalar(minCamDist);
+      }
 
-      // Interpola suave mas rápido o suficiente pra não "atrasar"
-      camera.position.lerp(idealPos, Math.min(delta * 10, 1));
+      camera.position.lerp(idealCamPos, Math.min(delta * 12, 1));
 
-      // O ponto de foco fica à frente do personagem, na altura da cintura
+      // Foco: um pouco à frente do personagem, na altura dele
       const focusPoint = pos.clone()
-        .add(fwd.clone().multiplyScalar(4))      // 4 blocos à frente
-        .add(up.clone().multiplyScalar(0.3));      // levemente acima dos pés
+        .add(fwd.clone().multiplyScalar(3))
+        .add(up.clone().multiplyScalar(0.3));
 
       camera.up.copy(up);
       camera.lookAt(focusPoint);
 
     } else if (cameraView === "first") {
-      // 1ª pessoa: câmera nos "olhos" do personagem
+      // 1ª pessoa: olhos do personagem
       const eyeHeight = up.clone().multiplyScalar(0.6);
       camera.position.copy(pos.clone().add(eyeHeight));
 
-      // Olha pra frente e levemente pra baixo pra ver o terreno
-      const lookPoint = pos.clone()
-        .add(fwd.clone().multiplyScalar(10))
-        .add(up.clone().multiplyScalar(-1));       // inclinação pra baixo
+      // Olha pra frente acompanhando a inclinação do terreno
+      // Calcula a altura do terreno 5 blocos à frente
+      const aheadPos = pos.clone().add(fwd.clone().multiplyScalar(5));
+      const aheadDist = aheadPos.length();
+      const anx = aheadPos.x / aheadDist, any2 = aheadPos.y / aheadDist, anz = aheadPos.z / aheadDist;
+      const aheadTerrainH = R + terrainHeight(anx, any2, anz);
+      const aheadUp = aheadPos.clone().normalize();
+      
+      // Ponto de foco na superfície à frente
+      const lookPoint = aheadUp.clone().multiplyScalar(aheadTerrainH + 0.5);
 
       camera.up.copy(up);
       camera.lookAt(lookPoint);
