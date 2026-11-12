@@ -35,11 +35,18 @@ function dot3(a: [number,number,number], b: [number,number,number]) {
 
 const HOLE_DIR = norm([-0.78, 0.08, -0.62]);
 const LAKE_DIR = norm([0.2, -0.6, -0.4]);
+const MTN_1 = norm([0.75, 0.55, -0.30]);
+const MTN_2 = norm([-0.50, 0.65, 0.50]);
+const MTN_3 = norm([0.10, -0.80, 0.55]);
 
 function terrainHeight(nx:number, ny:number, nz:number): number {
   const dir:[number,number,number]=[nx,ny,nz];
   const hills = (fbm(nx*2.5, ny*2.5, nz*2.5, 4)-0.3)*8;
   const smallPeaks = Math.pow(Math.max(0, fbm(nx*5, ny*5, nz*5, 2)-0.4), 2)*15;
+  const infl = (target: [number,number,number], thr: number) => {
+    const d = dot3(dir, target); if (d <= thr) return 0; const t = (d - thr) / (1 - thr); return t * t;
+  };
+  const mountains = infl(MTN_1, 0.94) * 22 + infl(MTN_2, 0.95) * 16 + infl(MTN_3, 0.96) * 12;
   const dH=dot3(dir,HOLE_DIR);
   let crater=0;
   if(dH>0.96) crater=-14;
@@ -48,7 +55,7 @@ function terrainHeight(nx:number, ny:number, nz:number): number {
   let lake=0;
   if(dL>0.94) lake=-6;
   else if(dL>0.86) { const t=(dL-0.86)/(0.94-0.86); lake=-6*(t*t*(3-2*t)); }
-  return hills + smallPeaks + crater + lake;
+  return hills + smallPeaks + mountains + crater + lake;
 }
 
 const keys: Record<string, boolean> = {};
@@ -65,9 +72,9 @@ export default function Player() {
   const raycaster = useRef(new THREE.Raycaster());
 
   // Configurações do Personagem
-  const moveSpeed = 6;       // bem mais lento = planeta parece gigante
+  const moveSpeed = 6;
   const turnSpeed = 8;
-  const playerHeight = 1.0;  // mais perto do chão
+  const playerHeight = 0.3;  // quase tocando o bloco (o mesh compensa visualmente)
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => { keys[e.key.toLowerCase()] = true; };
@@ -124,50 +131,20 @@ export default function Player() {
     // Rotação suave do modelo em direção ao targetDir
     playerDir.current.lerp(targetDir.current, delta * turnSpeed).normalize();
 
-    // ─── PISADA NO CHÃO (Raycaster Otimizado) ───
-    if (planetMesh) {
-      // Raio do topo do mundo (R+30) até o centro
-      const rayOrigin = pos.clone().normalize().multiplyScalar(R + 30);
-      const rayDir = up.clone().negate(); // aponta pro centro
-      
-      raycaster.current.set(rayOrigin, rayDir);
-      const intersects = raycaster.current.intersectObject(planetMesh);
-      
-      let hitFloor = false;
-      // Precisamos pegar a primeira intersecção que NÃO seja folha de árvore
-      for (let i = 0; i < intersects.length; i++) {
-        const hit = intersects[i];
-        
-        // Pega a cor instanciada naquele hit
-        const color = new THREE.Color();
-        if (hit.instanceId !== undefined) {
-          planetMesh.getColorAt(hit.instanceId, color);
-          // Ignora a cor verde das folhas (C.leaf1, leaf2, leaf3, leafBright)
-          // Simplificação: se for muito verde, provavelmente é folha
-          if (color.g > color.r * 1.5 && color.g > color.b * 1.5 && hit.point.length() > R + 6) {
-            continue; // É árvore, o raio passa direto
-          }
-        }
-        
-        // Se chegou aqui, bateu no chão ou no tronco
-        const targetDist = hit.point.length() + playerHeight;
-        
-        // Suaviza a subida para não "quicar" nos degraus dos voxels
-        const currentDist = pos.length();
-        const newDist = THREE.MathUtils.lerp(currentDist, targetDist, delta * 15);
-        
-        pos.normalize().multiplyScalar(newDist);
-        hitFloor = true;
-        break;
-      }
-      
-      if (!hitFloor) {
-        // Fallback: matemática pura do terreno se o raycast falhar
-        const nx = pos.x/pos.length(), ny = pos.y/pos.length(), nz = pos.z/pos.length();
-        const fallbackDist = R + terrainHeight(nx, ny, nz) + playerHeight;
-        pos.normalize().multiplyScalar(THREE.MathUtils.lerp(pos.length(), fallbackDist, delta * 15));
-      }
-    }
+    // ─── PISADA NO CHÃO ───
+    // Usa a fórmula do terreno direto (mais confiável que raycast para voxels esféricos)
+    const pDist = pos.length();
+    const pnx = pos.x / pDist, pny = pos.y / pDist, pnz = pos.z / pDist;
+    const surfaceH = R + terrainHeight(pnx, pny, pnz);
+    const targetDist = surfaceH + playerHeight;
+    
+    // Interpola rápido pra cima (subir montanha), instantâneo pra baixo (não flutuar)
+    const currentDist = pos.length();
+    const newDist = currentDist > targetDist
+      ? THREE.MathUtils.lerp(currentDist, targetDist, Math.min(delta * 25, 1))  // descendo: rápido
+      : THREE.MathUtils.lerp(currentDist, targetDist, Math.min(delta * 20, 1)); // subindo: rápido
+    
+    pos.normalize().multiplyScalar(newDist);
 
     // ─── ATUALIZA MESH ───
     if (meshRef.current) {
@@ -180,26 +157,40 @@ export default function Player() {
     }
 
     // ─── CÂMERA ───
+    // Forward tangencial (perpendicular a up) para a câmera
+    const fwd = playerDir.current.clone();
+    fwd.sub(up.clone().multiplyScalar(fwd.dot(up))).normalize();
+
     if (cameraView === "third") {
-      // 3ª pessoa: mais baixa e mais próxima, olhando levemente pra baixo
-      const behind = playerDir.current.clone().multiplyScalar(-6);  // perto das costas
-      const above = up.clone().multiplyScalar(3);                    // pouco acima
-      const targetCamPos = pos.clone().add(behind).add(above);
-      camera.position.lerp(targetCamPos, delta * 6);
-      // Olha um pouco à frente e abaixo do personagem (não no centro dele)
-      const lookTarget = pos.clone().add(playerDir.current.clone().multiplyScalar(3));
-      camera.lookAt(lookTarget);
+      // 3ª pessoa: câmera fica atrás+acima, olha pra frente+abaixo do personagem
+      // Offset calculado no espaço local do planeta (up = radial)
+      const behind = fwd.clone().multiplyScalar(-4);      // 4 blocos atrás
+      const above = up.clone().multiplyScalar(2.5);        // 2.5 blocos acima
+      const idealPos = pos.clone().add(behind).add(above);
+
+      // Interpola suave mas rápido o suficiente pra não "atrasar"
+      camera.position.lerp(idealPos, Math.min(delta * 10, 1));
+
+      // O ponto de foco fica à frente do personagem, na altura da cintura
+      const focusPoint = pos.clone()
+        .add(fwd.clone().multiplyScalar(4))      // 4 blocos à frente
+        .add(up.clone().multiplyScalar(0.3));      // levemente acima dos pés
+
       camera.up.copy(up);
+      camera.lookAt(focusPoint);
+
     } else if (cameraView === "first") {
-      // 1ª pessoa: nos olhos, olhando levemente pra baixo pra ver o chão
-      const eyeOffset = up.clone().multiplyScalar(0.8);
-      camera.position.copy(pos.clone().add(eyeOffset));
-      // Olha pra frente mas um pouco pra baixo
-      const lookDir = playerDir.current.clone().multiplyScalar(8);
-      const lookDown = up.clone().multiplyScalar(-0.5);
-      const lookPoint = pos.clone().add(lookDir).add(lookDown).add(eyeOffset);
-      camera.lookAt(lookPoint);
+      // 1ª pessoa: câmera nos "olhos" do personagem
+      const eyeHeight = up.clone().multiplyScalar(0.6);
+      camera.position.copy(pos.clone().add(eyeHeight));
+
+      // Olha pra frente e levemente pra baixo pra ver o terreno
+      const lookPoint = pos.clone()
+        .add(fwd.clone().multiplyScalar(10))
+        .add(up.clone().multiplyScalar(-1));       // inclinação pra baixo
+
       camera.up.copy(up);
+      camera.lookAt(lookPoint);
     }
   });
 
