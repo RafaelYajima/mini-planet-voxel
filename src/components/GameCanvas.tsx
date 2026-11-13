@@ -5,9 +5,9 @@ import { useGameState } from "@/context/GameContext";
 import LoadingScreen from "./LoadingScreen";
 import HUD from "./hud/HUD";
 
-const VoxelPlanet = dynamic(() => import("./VoxelPlanet"), {
+const Island = dynamic(() => import("./Island"), {
   ssr: false,
-  loading: () => <div className="absolute inset-0 bg-[#05070f]" />,
+  loading: () => <div className="absolute inset-0 bg-[#87ceeb]" />,
 });
 
 export default function GameCanvas() {
@@ -16,15 +16,11 @@ export default function GameCanvas() {
 
   return (
     <div className="fixed inset-0">
-      {/* Canvas 3D — desabilitado enquanto paineis estao abertos */}
       <div className={lockCanvas ? "absolute inset-0 pointer-events-none" : "absolute inset-0"}>
-        <VoxelPlanet />
+        <Island />
       </div>
 
-      {/* HUD sobreposta */}
       {entered && <HUD />}
-
-      {/* Loading Screen */}
       {!entered && <LoadingScreen />}
     </div>
   );
