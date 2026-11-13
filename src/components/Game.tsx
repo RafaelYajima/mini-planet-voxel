@@ -466,9 +466,9 @@ export default function Game() {
 
           {/* Wave & Kills */}
           <div className="flex flex-col items-center gap-1">
-            <span className="text-[10px] font-bold uppercase tracking-widest text-violet-400">Wave {wave}</span>
+            <span className="text-[10px] font-bold uppercase tracking-widest text-violet-400">Sector {wave}</span>
             <span className="text-3xl font-black text-white">{kills}</span>
-            <span className="text-[10px] text-slate-400">KILLS</span>
+            <span className="text-[10px] text-slate-400">HOSTILES DOWN</span>
           </div>
 
           {/* Ammo */}
@@ -483,13 +483,13 @@ export default function Game() {
       {gameState === "menu" && (
         <div className="fixed inset-0 z-20 flex items-center justify-center bg-slate-950/90">
           <div className="text-center">
-            <h1 className="text-5xl font-black tracking-tight text-white mb-2">MINI-PLANET</h1>
-            <p className="text-xl font-bold text-violet-400 mb-8">SHOOTER</p>
+            <h1 className="text-5xl font-black tracking-tight text-white mb-2">NULL SECTOR</h1>
+            <p className="text-xl font-bold text-violet-400 mb-8">ARENA</p>
             <button onClick={startGame}
-              className="px-10 py-4 bg-violet-600 hover:bg-violet-500 text-white font-bold text-lg rounded-2xl transition shadow-2xl shadow-violet-600/30">
-              START GAME
+              className="px-10 py-4 bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-lg rounded-2xl transition shadow-2xl shadow-cyan-600/30">
+              DEPLOY
             </button>
-            <p className="mt-6 text-xs text-slate-500">WASD to move · Mouse to aim · Click to shoot · Space to jump</p>
+            <p className="mt-6 text-xs text-slate-500">WASD move · Mouse aim · Click shoot · Space jump · Esc release cursor</p>
           </div>
         </div>
       )}
@@ -498,11 +498,11 @@ export default function Game() {
       {gameState === "dead" && (
         <div className="fixed inset-0 z-20 flex items-center justify-center bg-red-950/80">
           <div className="text-center">
-            <h2 className="text-4xl font-black text-red-400 mb-4">YOU DIED</h2>
-            <p className="text-lg text-white mb-2">Wave {wave} · {kills} Kills</p>
+            <h2 className="text-4xl font-black text-red-400 mb-4">UNIT LOST</h2>
+            <p className="text-lg text-white mb-2">Sector {wave} · {kills} Hostiles Down</p>
             <button onClick={startGame}
               className="mt-6 px-8 py-3 bg-red-600 hover:bg-red-500 text-white font-bold rounded-2xl transition">
-              TRY AGAIN
+              REDEPLOY
             </button>
           </div>
         </div>

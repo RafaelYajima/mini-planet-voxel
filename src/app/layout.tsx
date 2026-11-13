@@ -3,8 +3,8 @@ import type { ReactNode } from "react";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Mini-planet Shooter",
-  description: "FPS web game built with Three.js and Next.js",
+  title: "Null Sector Arena",
+  description: "Fast-paced browser FPS built with Three.js and Next.js",
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {
