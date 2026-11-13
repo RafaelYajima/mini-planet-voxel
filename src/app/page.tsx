@@ -1,10 +1,9 @@
-import { GameProvider } from "@/context/GameContext";
-import GameCanvas from "@/components/GameCanvas";
+"use client";
+
+import dynamic from "next/dynamic";
+
+const Game = dynamic(() => import("@/components/Game"), { ssr: false });
 
 export default function HomePage() {
-  return (
-    <GameProvider>
-      <GameCanvas />
-    </GameProvider>
-  );
+  return <Game />;
 }
