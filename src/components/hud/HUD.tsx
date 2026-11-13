@@ -27,7 +27,7 @@ export default function HUD() {
   const { zenMode, weatherPanelOpen, diaryOpen, weather, zoom, level, cameraView } = state;
 
   const cameraLabels: Record<string, string> = {
-    orbit: "🌍 Órbita",
+    orbit: "🌍 Livre",
     third: "🎮 3ª Pessoa",
     first: "👁 1ª Pessoa",
   };
@@ -38,7 +38,7 @@ export default function HUD() {
       {zenMode && (
         <button
           onClick={() => dispatch({ type: "TOGGLE_ZEN" })}
-          className="fixed bottom-6 right-6 z-40 px-4 py-2 rounded-xl border border-white/10 bg-slate-950/50 backdrop-blur text-xs text-slate-400 hover:text-white transition"
+          className="fixed bottom-8 left-1/2 -translate-x-1/2 z-40 px-6 py-2.5 rounded-2xl border border-white/20 bg-slate-900/40 backdrop-blur-xl text-[10px] font-bold uppercase tracking-[0.2em] text-white hover:bg-slate-800/60 transition shadow-2xl"
         >
           Sair do Modo Zen
         </button>
@@ -52,64 +52,63 @@ export default function HUD() {
       >
         {/* ── BARRA SUPERIOR ── */}
         <div
-          className="pointer-events-auto absolute top-0 left-0 right-0 flex items-center justify-between px-4 py-3 bg-slate-950/60 backdrop-blur-md border-b border-white/5"
+          className="pointer-events-auto absolute top-4 left-4 right-4 flex items-center justify-between px-6 py-4 bg-slate-950/40 backdrop-blur-2xl border border-white/10 rounded-2xl shadow-2xl"
           onPointerDown={blockCanvas}
           onMouseDown={blockCanvas}
           onTouchStart={blockCanvas}
         >
           {/* Esquerda: Logo + Nível + XP */}
-          <div className="flex items-center gap-4">
-            <div className="flex items-center gap-2 mr-2">
-              <Boxes className="w-5 h-5 text-emerald-400" />
-              <span className="text-xs font-bold tracking-widest uppercase text-slate-200 hidden sm:block">
-                Mini-planet Voxel
+          <div className="flex items-center gap-6">
+            <div className="flex items-center gap-3 pr-6 border-r border-white/10">
+              <span className="grid h-10 w-10 place-items-center rounded-xl bg-emerald-500/20 border border-emerald-500/20">
+                <Boxes className="w-5 h-5 text-emerald-400" />
               </span>
+              <div className="flex flex-col">
+                <span className="text-[10px] font-bold tracking-[0.2em] uppercase text-emerald-400">Mini-planet</span>
+                <span className="text-sm font-black tracking-tight text-white leading-tight">VOXEL</span>
+              </div>
             </div>
             <XPBar />
           </div>
 
           {/* Direita: botões de ação */}
-          <div className="flex items-center gap-2">
-            {/* Clima */}
+          <div className="flex items-center gap-3">
             <button
               onClick={() => dispatch({ type: "TOGGLE_WEATHER_PANEL" })}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-medium transition
+              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl border text-[10px] font-bold uppercase tracking-widest transition
                 ${weatherPanelOpen
                   ? "border-sky-400/50 bg-sky-400/10 text-sky-300"
-                  : "border-white/10 bg-white/5 text-slate-300 hover:bg-white/10"}`}
+                  : "border-white/5 bg-white/5 text-slate-300 hover:bg-white/10"}`}
             >
-              <span className="text-sm">{WEATHER_EMOJI[weather]}</span>
-              <Cloud className="w-3.5 h-3.5" />
+              <span>{WEATHER_EMOJI[weather]}</span>
+              <span className="hidden lg:inline">Clima</span>
             </button>
 
-            {/* Diário */}
             <button
               onClick={() => dispatch({ type: "TOGGLE_DIARY" })}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-medium transition
+              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl border text-[10px] font-bold uppercase tracking-widest transition
                 ${diaryOpen
                   ? "border-amber-400/50 bg-amber-400/10 text-amber-300"
-                  : "border-white/10 bg-white/5 text-slate-300 hover:bg-white/10"}`}
+                  : "border-white/5 bg-white/5 text-slate-300 hover:bg-white/10"}`}
             >
-              <BookOpen className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">Diário</span>
+              <BookOpen className="w-4 h-4" />
+              <span className="hidden lg:inline">Diário</span>
             </button>
 
-            {/* Câmera */}
             <button
               onClick={() => dispatch({ type: "TOGGLE_CAMERA_VIEW" })}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-emerald-400/30 bg-emerald-400/10 text-emerald-300 text-xs font-medium transition hover:bg-emerald-400/20"
+              className="flex items-center gap-2 px-4 py-2.5 rounded-xl border border-white/5 bg-white/5 text-white text-[10px] font-bold uppercase tracking-widest transition hover:bg-white/10"
             >
-              <Camera className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">{cameraLabels[cameraView]}</span>
+              <Camera className="w-4 h-4" />
+              <span>{cameraLabels[cameraView]}</span>
             </button>
 
-            {/* Zen */}
             <button
               onClick={() => dispatch({ type: "TOGGLE_ZEN" })}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-white/10 bg-white/5 text-slate-300 hover:bg-white/10 text-xs font-medium transition"
+              className="p-2.5 rounded-xl border border-white/5 bg-white/5 text-white hover:bg-white/10 transition"
+              title="Modo Zen"
             >
-              <ScanEye className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">Zen</span>
+              <ScanEye className="w-4 h-4" />
             </button>
           </div>
         </div>

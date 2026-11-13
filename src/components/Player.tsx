@@ -13,23 +13,22 @@ export default function Player() {
   const { camera, gl } = useThree();
 
   const pos = useRef(new THREE.Vector3(0, 10, 0));
-  const yaw = useRef(0);   // horizontal (mouse X)
-  const pitch = useRef(-0.2); // vertical (mouse Y) — leve inclinação pra baixo
+  const yaw = useRef(0);
+  const pitch = useRef(-0.2);
+  const velocity = useRef(new THREE.Vector3());
   const meshRef = useRef<THREE.Group>(null!);
-  const isLocked = useRef(false);
+  
+  // Damping states
+  const camPosSmooth = useRef(new THREE.Vector3());
+  const camTargetSmooth = useRef(new THREE.Vector3());
 
-  const SPEED = 8;
-  const MOUSE_SENS = 0.002;
-  const PLAYER_HEIGHT = 1.8;
-  const EYE_HEIGHT = 1.6;
-  const CAM_DISTANCE = 6;
-  const CAM_HEIGHT = 3;
+  const SPEED = 12;
+  const MOUSE_SENS = 0.0025;
 
-  // Pointer Lock para mouse look
   const requestLock = useCallback(() => {
-    if (cameraView === "orbit") return;
+    if (cameraView === "orbit" || !entered) return;
     gl.domElement.requestPointerLock();
-  }, [gl, cameraView]);
+  }, [gl, cameraView, entered]);
 
   useEffect(() => {
     const onDown = (e: KeyboardEvent) => { keys[e.key.toLowerCase()] = true; };
@@ -38,129 +37,88 @@ export default function Player() {
       if (document.pointerLockElement !== gl.domElement) return;
       yaw.current -= e.movementX * MOUSE_SENS;
       pitch.current -= e.movementY * MOUSE_SENS;
-      pitch.current = Math.max(-Math.PI / 2.5, Math.min(Math.PI / 3, pitch.current));
+      pitch.current = Math.max(-Math.PI / 2.2, Math.min(Math.PI / 3, pitch.current));
     };
-    const onLockChange = () => {
-      isLocked.current = document.pointerLockElement === gl.domElement;
-    };
-    const onClick = () => requestLock();
-
+    
     window.addEventListener("keydown", onDown);
     window.addEventListener("keyup", onUp);
     document.addEventListener("mousemove", onMouseMove);
-    document.addEventListener("pointerlockchange", onLockChange);
-    gl.domElement.addEventListener("click", onClick);
+    gl.domElement.addEventListener("mousedown", requestLock);
 
     return () => {
       window.removeEventListener("keydown", onDown);
       window.removeEventListener("keyup", onUp);
       document.removeEventListener("mousemove", onMouseMove);
-      document.removeEventListener("pointerlockchange", onLockChange);
-      gl.domElement.removeEventListener("click", onClick);
+      gl.domElement.removeEventListener("mousedown", requestLock);
     };
   }, [gl, requestLock]);
 
-  useFrame((_, delta) => {
+  useFrame((state, delta) => {
     if (!entered || weatherPanelOpen || diaryOpen || cameraView === "orbit") return;
 
     const p = pos.current;
+    const forward = new THREE.Vector3(-Math.sin(yaw.current), 0, -Math.cos(yaw.current));
+    const right = new THREE.Vector3(-Math.cos(yaw.current), 0, Math.sin(yaw.current));
 
-    // Forward e Right baseados no yaw (horizontal)
-    const forward = new THREE.Vector3(
-      -Math.sin(yaw.current), 0, -Math.cos(yaw.current)
-    ).normalize();
-    const right = new THREE.Vector3(
-      -Math.cos(yaw.current), 0, Math.sin(yaw.current)
-    ).normalize();
+    // Movimento com aceleração
+    const input = new THREE.Vector3();
+    if (keys["w"]) input.add(forward);
+    if (keys["s"]) input.sub(forward);
+    if (keys["a"]) input.sub(right);
+    if (keys["d"]) input.add(right);
+    
+    if (input.lengthSq() > 0) input.normalize();
+    velocity.current.lerp(input.multiplyScalar(SPEED), delta * 10);
+    p.add(velocity.current.clone().multiplyScalar(delta));
 
-    // WASD move na direção que o jogador olha
-    const moveDir = new THREE.Vector3(0, 0, 0);
-    if (keys["w"] || keys["arrowup"]) moveDir.add(forward);
-    if (keys["s"] || keys["arrowdown"]) moveDir.sub(forward);
-    if (keys["a"] || keys["arrowleft"]) moveDir.sub(right);
-    if (keys["d"] || keys["arrowright"]) moveDir.add(right);
+    // Terreno e colisão simples
+    const h = getTerrainHeight(p.x, p.z);
+    p.y = THREE.MathUtils.lerp(p.y, Math.max(h, -0.6), 0.2);
 
-    if (moveDir.lengthSq() > 0) {
-      moveDir.normalize();
-      p.add(moveDir.multiplyScalar(SPEED * delta));
-    }
-
-    // Clamp à ilha
-    const maxDist = 85;
-    const dist2d = Math.sqrt(p.x * p.x + p.z * p.z);
-    if (dist2d > maxDist) {
-      p.x *= maxDist / dist2d;
-      p.z *= maxDist / dist2d;
-    }
-
-    // Gravidade: snap no terreno
-    const groundH = getTerrainHeight(p.x, p.z);
-    const waterLevel = -0.5;
-    p.y = Math.max(groundH, waterLevel) + PLAYER_HEIGHT * 0.05;
-
-    // Atualiza Modelo
+    // Mesh
     if (meshRef.current) {
-      meshRef.current.position.set(p.x, p.y, p.z);
-      meshRef.current.rotation.set(0, yaw.current, 0);
+      meshRef.current.position.copy(p);
+      meshRef.current.rotation.y = yaw.current;
+      // Balanço sutil ao andar
+      const speedFactor = velocity.current.length();
+      if (speedFactor > 0.1) {
+        meshRef.current.rotation.z = Math.sin(state.clock.elapsedTime * 10) * 0.05;
+        meshRef.current.position.y += Math.abs(Math.sin(state.clock.elapsedTime * 10)) * 0.1;
+      }
     }
 
-    // Câmera
+    // Câmera Suavizada
     if (cameraView === "third") {
-      // 3ª pessoa: câmera atrás do jogador com mouse controlando ângulo
-      const camX = p.x + Math.sin(yaw.current) * CAM_DISTANCE * Math.cos(pitch.current);
-      const camY = p.y + CAM_HEIGHT + Math.sin(pitch.current) * CAM_DISTANCE;
-      const camZ = p.z + Math.cos(yaw.current) * CAM_DISTANCE * Math.cos(pitch.current);
-
-      // Garante câmera acima do chão
-      const camGroundH = getTerrainHeight(camX, camZ);
-      const finalCamY = Math.max(camY, camGroundH + 1.5);
-
-      camera.position.lerp(new THREE.Vector3(camX, finalCamY, camZ), 0.15);
-      camera.lookAt(p.x, p.y + 1, p.z);
+      const distance = 8;
+      const height = 4;
+      const camX = p.x + Math.sin(yaw.current) * distance * Math.cos(pitch.current);
+      const camY = p.y + height + Math.sin(pitch.current) * distance;
+      const camZ = p.z + Math.cos(yaw.current) * distance * Math.cos(pitch.current);
+      
+      const targetPos = new THREE.Vector3(camX, Math.max(camY, h + 2), camZ);
+      camPosSmooth.current.lerp(targetPos, 0.15);
+      camera.position.copy(camPosSmooth.current);
+      
+      const targetLookAt = p.clone().add(new THREE.Vector3(0, 1.5, 0));
+      camTargetSmooth.current.lerp(targetLookAt, 0.2);
+      camera.lookAt(camTargetSmooth.current);
 
     } else if (cameraView === "first") {
-      // 1ª pessoa: nos olhos
-      camera.position.set(p.x, p.y + EYE_HEIGHT, p.z);
-
-      // Direção de visão baseada em yaw + pitch
-      const lookX = p.x - Math.sin(yaw.current) * 10;
-      const lookY = p.y + EYE_HEIGHT + Math.sin(pitch.current) * 10;
-      const lookZ = p.z - Math.cos(yaw.current) * 10;
-      camera.lookAt(lookX, lookY, lookZ);
+      camera.position.set(p.x, p.y + 1.6, p.z);
+      const lookDir = new THREE.Vector3(-Math.sin(yaw.current), Math.sin(pitch.current), -Math.cos(yaw.current));
+      camera.lookAt(p.clone().add(lookDir.multiplyScalar(10)));
     }
   });
 
-  const visible = cameraView !== "first";
-
   return (
-    <group ref={meshRef} visible={visible}>
-      {/* Corpo */}
-      <mesh position={[0, 0.6, 0]} castShadow>
-        <boxGeometry args={[0.5, 0.7, 0.35]} />
+    <group ref={meshRef} visible={cameraView !== "first"}>
+      <mesh position={[0, 0.7, 0]} castShadow>
+        <capsuleGeometry args={[0.3, 0.8, 4, 8]} />
         <meshStandardMaterial color="#3b82f6" />
       </mesh>
-      {/* Cabeça */}
-      <mesh position={[0, 1.15, 0]} castShadow>
-        <boxGeometry args={[0.4, 0.4, 0.4]} />
+      <mesh position={[0, 1.4, 0]} castShadow>
+        <boxGeometry args={[0.5, 0.45, 0.4]} />
         <meshStandardMaterial color="#fcd34d" />
-      </mesh>
-      {/* Pernas */}
-      <mesh position={[-0.12, 0.15, 0]} castShadow>
-        <boxGeometry args={[0.2, 0.35, 0.25]} />
-        <meshStandardMaterial color="#1e3a5f" />
-      </mesh>
-      <mesh position={[0.12, 0.15, 0]} castShadow>
-        <boxGeometry args={[0.2, 0.35, 0.25]} />
-        <meshStandardMaterial color="#1e3a5f" />
-      </mesh>
-      {/* Braços */}
-      <mesh position={[-0.35, 0.65, 0]} castShadow>
-        <boxGeometry args={[0.15, 0.5, 0.2]} />
-        <meshStandardMaterial color="#3b82f6" />
-      </mesh>
-      <mesh position={[0.35, 0.65, 0]} castShadow>
-        <boxGeometry args={[0.15, 0.5, 0.2]} />
-        <meshStandardMaterial color="#3b82f6" />
       </mesh>
     </group>
   );
